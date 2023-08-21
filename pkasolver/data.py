@@ -8,13 +8,11 @@ from rdkit.Chem import PandasTools, PropertyMol
 from rdkit.Chem.AllChem import Compute2DCoords
 from rdkit.Chem.PandasTools import LoadSDF
 
-PandasTools.RenderImagesInAllDataFrames(images=True)
-import random
-
 import numpy as np
 import pandas as pd
 import torch
 import tqdm
+from pandas.core.common import flatten
 from torch_geometric.data import Data
 
 from pkasolver.chem import create_conjugate
@@ -25,6 +23,8 @@ from pkasolver.constants import (
     edge_feat_values,
     node_feat_values,
 )
+
+PandasTools.RenderImagesInAllDataFrames(images=True)
 
 
 def load_data(base: str = "data/Baltruschat") -> dict:
@@ -271,9 +271,6 @@ class PairData(Data):
             return self.x_d.size(0)
         else:
             return super().__inc__(key, value, *args, **kwargs)
-
-
-from pandas.core.common import flatten
 
 
 def calculate_nr_of_features(feature_list: list) -> int:
@@ -662,7 +659,7 @@ def make_paired_pyg_data_from_mol(
         m.pka_type = ""
     try:
         m.ID = props["ID"]
-    except:
+    except Exception:
         m.ID = ""
     return m
 

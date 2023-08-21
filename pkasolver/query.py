@@ -65,12 +65,11 @@ class QueryModel:
         self.models = []
 
         for i in range(25):
-            model_name, model_class = "GINPair", GINPairV1
-            model = model_class(
+            model = GINPairV1(
                 num_node_features, num_edge_features, hidden_channels=96
             )
             base_path = path.dirname(__file__)
-            if torch.cuda.is_available() == False:  # If only CPU is available
+            if not torch.cuda.is_available():
                 checkpoint = torch.load(
                     f"{base_path}/trained_model_without_epik/best_model_{i}.pt",
                     map_location=torch.device("cpu"),
@@ -181,7 +180,7 @@ def _call_dimorphite_dl(
     path_to_script = path.dirname(__file__)
     smiles = Chem.MolToSmiles(mol, isomericSmiles=True)
     # save properties
-    props = mol.GetPropsAsDict()
+    _ = mol.GetPropsAsDict()
 
     o = subprocess.run(
         [
@@ -238,7 +237,7 @@ def calculate_microstate_pka_values(
 ):
     """Enumerate protonation states using a rdkit mol as input"""
 
-    if query_model == None:
+    if query_model is None:
         query_model = QueryModel()
 
     if only_dimorphite:
@@ -323,7 +322,7 @@ def calculate_microstate_pka_values(
                         pka=0.0,
                         known_pka_values=False,
                     )
-                except:
+                except Exception:
                     continue
 
                 logger.debug(f"{Chem.MolToSmiles(conj)}")
@@ -404,7 +403,7 @@ def calculate_microstate_pka_values(
                     conj = create_conjugate(
                         mol_at_state, i, pka=13.5, known_pka_values=False
                     )
-                except:
+                except Exception:
                     continue
                 sorted_mols = _sort_conj([conj, mol_at_state])
                 m = mol_to_paired_mol_data(
@@ -478,7 +477,7 @@ def draw_pka_map(protonation_states: list, size=(450, 450)):
         atom = mol_at_ph_7.GetAtomWithIdx(state.reaction_center_idx)
         try:
             atom.SetProp("atomNote", f'{atom.GetProp("atomNote")},   {state.pka:.2f}')
-        except:
+        except Exception:
             atom.SetProp("atomNote", f"{state.pka:.2f}")
     return Draw.MolToImage(mol_at_ph_7, size=size)
 

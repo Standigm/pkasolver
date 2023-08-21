@@ -54,7 +54,7 @@ try:
     from rdkit import RDLogger
 
     RDLogger.DisableLog("rdApp.*")
-except:
+except Exception:
     msg = "Dimorphite-DL requires RDKit. See https://www.rdkit.org/"
     print(msg)
     raise Exception(msg)
@@ -249,7 +249,7 @@ class ArgParseFuncs:
             if args[key] is None:
                 del args[key]
 
-        if not "smiles" in args and not "smiles_file" in args:
+        if "smiles" not in args and "smiles_file" not in args:
             msg = "Error: No SMILES in params. Use the -h parameter for help."
             print(msg)
             raise Exception(msg)
@@ -497,7 +497,7 @@ class LoadSMIFile(object):
             # Remove the hydrogens.
             try:
                 mol = Chem.RemoveHs(mol)
-            except:
+            except Exception:
                 if "silent" in self.args and not self.args["silent"]:
                     UtilFuncs.eprint(
                         "WARNING: Skipping poorly formed SMILES string: " + line
@@ -740,7 +740,7 @@ class ProtSubstructFuncs:
         for line in ProtSubstructFuncs.load_substructre_smarts_file():
             line = line.strip()
             sub = {}
-            if line is not "":
+            if line != "":
                 splits = line.split()
                 sub["name"] = splits[0]
                 sub["smart"] = splits[1]
@@ -814,7 +814,7 @@ class ProtSubstructFuncs:
         # Try to Add hydrogens. if failed return []
         try:
             mol_used_to_idx_sites = Chem.AddHs(mol_used_to_idx_sites)
-        except:
+        except Exception:
             UtilFuncs.eprint("ERROR:   ", smi)
             return []
 
@@ -841,7 +841,7 @@ class ProtSubstructFuncs:
                         category = site[1]
                         new_site = (match[proton], category, item["name"])
 
-                        if not new_site in protonation_sites:
+                        if new_site not in protonation_sites:
                             # Because sites must be unique.
                             protonation_sites.append(new_site)
 
@@ -911,7 +911,7 @@ class ProtSubstructFuncs:
                 # Remove hydrogen atoms.
                 try:
                     mol_copy = Chem.RemoveHs(mol_copy)
-                except:
+                except Exception:
                     if (
                         "silent" in ProtSubstructFuncs.args
                         and not ProtSubstructFuncs.args["silent"]

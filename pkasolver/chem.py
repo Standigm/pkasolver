@@ -80,7 +80,7 @@ def create_conjugate(
     if (
         atom.GetSymbol() == "O"
         and atom.GetFormalCharge() == 1
-        and known_pka_values == False
+        and not known_pka_values
     ):
         raise RuntimeError("Protonating already protonated oxygen. Aborting.")
 

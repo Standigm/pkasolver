@@ -1,10 +1,10 @@
 import logging
 
+import torch
+
 from pkasolver.chem import atom_smarts_query, bond_smarts_query, make_smarts_features
 
 logger = logging.getLogger(__name__)
-
-import torch
 
 NUM_THREADS = 1
 torch.set_num_threads(NUM_THREADS)
@@ -16,9 +16,9 @@ logger.debug(f"Pytorch will use {DEVICE}")
 
 # Defining Smarts patterns used to calculate some node and edge features
 rotatable_bond = "[!$(*#*)&!D1]-&!@[!$(*#*)&!D1]"
-rotatable_bond_no_amide = (  # any good? https://rdkit-discuss.narkive.com/4o99LqS6/rotatable-bonds-amide-bonds-and-smarts
-    "[!$([NH]!@C(=O))&!D1&!$(*#*)]-&!@[!$([NH]!@C(=O))&!D1&!$(*#*)]"
-)
+# any good? https://rdkit-discuss.narkive.com/4o99LqS6/rotatable-bonds-amide-bonds-and-smarts
+rotatable_bond_no_amide = "[!$([NH]!@C(=O))&!D1&!$(*#*)]-&!@[!$([NH]!@C(=O))&!D1&!$(*#*)]"
+
 amide = "[NX3][CX3](=[OX1])[#6]"
 keton = "[CX3]=[OX1]"
 
@@ -66,6 +66,7 @@ smarts_dict = {
 }
 
 node_feat_values = {
+    # still missing to mark element that's not in the list
     "element": [
         1,
         6,
@@ -78,7 +79,7 @@ node_feat_values = {
         33,
         35,
         53,
-    ],  # still missing to mark element that's not in the list
+    ],
     "formal_charge": [-1, 0, 1],
     "is_in_ring": [1],
     "amide_center_atom": [1],
