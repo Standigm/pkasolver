@@ -174,14 +174,12 @@ def _sort_conj(mols: list):
             "Neighboring protonation states are only allowed to have a difference of a"
             " single hydrogen."
         )
-    # https://stackoverflow.com/questions/6618515/sorting-list-based-on-values-from-another-list
-    mols_sorted = [x for _, x in sorted(zip(nr_of_hydrogen, mols), reverse=True)]
-    return mols_sorted
+    return [x for _, x in sorted(zip(nr_of_hydrogen, mols), reverse=True)]
 
 
 def _check_for_duplicates(states: list):
     """check whether two states have the same pKa value and remove one of them"""
-    all_r = dict()
+    all_r = {}
     logger.debug(states)
     for state in states:
         m1, m2 = _sort_conj([state.protonated_mol, state.deprotonated_mol])
@@ -327,14 +325,8 @@ def calculate_microstate_pka_values(
                 )
 
                 # if this is NOT the first state found
-                if acids:
-                    # check if previous pka value is lower and if yes, add it
-                    if pka < acids[-1].pka:
-                        states_per_iteration.append(pair)
-                else:
-                    # if this is the first state found
+                if acids and pka < acids[-1].pka or not acids:
                     states_per_iteration.append(pair)
-
             if not states_per_iteration:
                 # no protonation state left
                 break
@@ -400,13 +392,8 @@ def calculate_microstate_pka_values(
                     Chem.MolToSmiles(mol_at_state),
                 )
                 # if bases already present
-                if bases:
-                    # check if previous pka is higher
-                    if pka > bases[-1].pka:
-                        states_per_iteration.append(pair)
-                else:
+                if bases and pka > bases[-1].pka or not bases:
                     states_per_iteration.append(pair)
-
             # no protonation state left
             if not states_per_iteration:
                 break
@@ -431,8 +418,7 @@ def calculate_microstate_pka_values(
 def draw_pka_map(protonation_states: list, size=(450, 450)):
     """draw mol at pH=7.0 and indicate protonation sites with respectiv pKa values"""
     mol_at_ph_7 = deepcopy(protonation_states[0].ph7_mol)
-    for protonation_state in range(len(protonation_states)):
-        state = protonation_states[protonation_state]
+    for state in protonation_states:
         atom = mol_at_ph_7.GetAtomWithIdx(state.reaction_center_idx)
         try:
             atom.SetProp("atomNote", f'{atom.GetProp("atomNote")},   {state.pka:.2f}')

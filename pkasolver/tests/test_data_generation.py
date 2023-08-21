@@ -30,9 +30,9 @@ def test_aspirin_pka_split():
             "python",
             f"{path_to_pkasolver_data_repo}/scripts/04_1_split_epik_output.py",
             "--input",
-            f"pkasolver/tests/testdata/03_aspirin_with_pka.sdf",
+            "pkasolver/tests/testdata/03_aspirin_with_pka.sdf",
             "--output",
-            f"pkasolver/tests/testdata/04_split_aspirin_with_pka.pkl",
+            "pkasolver/tests/testdata/04_split_aspirin_with_pka.pkl",
         ],
         stderr=subprocess.STDOUT,
     )
@@ -63,9 +63,9 @@ def test_eltrombopag_pka_split():
             "python",
             f"{path_to_pkasolver_data_repo}/scripts/04_1_split_epik_output.py",
             "--input",
-            f"pkasolver/tests/testdata/03_eltrombopag_with_pka.sdf",
+            "pkasolver/tests/testdata/03_eltrombopag_with_pka.sdf",
             "--output",
-            f"pkasolver/tests/testdata/04_split_eltrombopag_with_pka.pkl",
+            "pkasolver/tests/testdata/04_split_eltrombopag_with_pka.pkl",
         ],
         stderr=subprocess.STDOUT,
     )
@@ -117,9 +117,9 @@ def test_edta_pka_split():
             "python",
             f"{path_to_pkasolver_data_repo}/scripts/04_1_split_epik_output.py",
             "--input",
-            f"pkasolver/tests/testdata/03_edta_with_pka.sdf",
+            "pkasolver/tests/testdata/03_edta_with_pka.sdf",
             "--output",
-            f"pkasolver/tests/testdata/04_split_edta_with_pka.pkl",
+            "pkasolver/tests/testdata/04_split_edta_with_pka.pkl",
         ],
         stderr=subprocess.STDOUT,
     )
@@ -175,9 +175,9 @@ def test_exp_sets_generation():
             "python",
             f"{path_to_pkasolver_data_repo}/scripts/04_2_prepare_rest.py",
             "--input",
-            f"pkasolver/tests/testdata/00_experimental_training_datasets_subset.sdf",
+            "pkasolver/tests/testdata/00_experimental_training_datasets_subset.sdf",
             "--output",
-            f"pkasolver/tests/testdata/exp_training_dataset.pkl",
+            "pkasolver/tests/testdata/exp_training_dataset.pkl",
         ],
         stderr=subprocess.STDOUT,
     )
@@ -233,9 +233,9 @@ def test_data_preprocessing_for_baltruschat():
             "python",
             f"{path_to_pkasolver_data_repo}/scripts/05_data_preprocess.py",
             "--input",
-            f"pkasolver/tests/testdata/exp_training_dataset.pkl",
+            "pkasolver/tests/testdata/exp_training_dataset.pkl",
             "--output",
-            f"pkasolver/tests/testdata/test.pkl",
+            "pkasolver/tests/testdata/test.pkl",
         ],
         stderr=subprocess.STDOUT,
     )
@@ -311,9 +311,7 @@ def test_dataset():
 
         # the difference needs to be 1
         assert abs(charge_prot - charge_deprot) == 1
-        charges.append(charge_prot)
-        charges.append(charge_deprot)
-
+        charges.extend((charge_prot, charge_deprot))
     # NOTE: quite a lot of negative charges
     assert max(charges) == 2
     assert min(charges) == -4
@@ -690,7 +688,7 @@ def test_generate_dataset_from_sdf():
     training_dataset_path = sdf_filepaths["Training"]
 
     # save averything in dict
-    all_protonation_states_enumerated = dict()
+    all_protonation_states_enumerated = {}
     GLOBAL_COUNTER = 0
     nr_of_skipped_mols = 0
 
@@ -699,15 +697,13 @@ def test_generate_dataset_from_sdf():
 
         for nr_of_mols, mol in enumerate(suppl):
             props = mol.GetPropsAsDict()
-            pkas = []
-            pkas.append(
+            pkas = [
                 {
-                    "pka_value": float(props[f"pKa"]),
-                    "atom_idx": int(props[f"marvin_atom"]),
+                    "pka_value": float(props["pKa"]),
+                    "atom_idx": int(props["marvin_atom"]),
                     "chembl_id": f"mol{nr_of_mols}",
                 }
-            )
-
+            ]
             # calculate number of acidic and basic pka values
             nr_of_acids = sum(
                 pka["pka_value"] <= PH and pka["pka_value"] > 0.5 for pka in pkas
@@ -825,7 +821,7 @@ def test_generate_dataset_from_sdf():
                         f" {mol1.GetProp('epik_atom')}"
                     )
 
-                if chembl_id in all_protonation_states_enumerated.keys():
+                if chembl_id in all_protonation_states_enumerated:
                     raise RuntimeError("Repeated chembl id!")
 
                 all_protonation_states_enumerated[chembl_id] = {

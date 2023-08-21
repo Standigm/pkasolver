@@ -102,9 +102,7 @@ def test_train_gcn_models():
     num_node_features = calculate_nr_of_features(list_n)
     num_edge_features = calculate_nr_of_features(list_e)
 
-    i_e = 0
-    for feat in list_e:
-        i_e += len(edge_feat_values[feat])
+    i_e = sum(len(edge_feat_values[feat]) for feat in list_e)
     num_edge_features = i_e
 
     for model_name, model_class in models:
@@ -345,10 +343,8 @@ def test_only_GINProt_models():
 def test_count_nr_of_parameters():
     from torch.nn import Linear, ModuleList
 
-    lins = []
-    lins.append(Linear(64, 96))
-    for _ in range(0, 2):
-        lins.append(Linear(96, 96))
+    lins = [Linear(64, 96)]
+    lins.extend(Linear(96, 96) for _ in range(2))
     lins.append(Linear(96, 1))
     model = ModuleList(lins)
     print(model)

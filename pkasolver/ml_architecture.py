@@ -116,11 +116,10 @@ class BasicGNN(torch.nn.Module):
                 self.lin = Linear(num_layers * hidden_channels, out_channels)
             else:
                 self.lin = Linear(hidden_channels, out_channels)
+        elif jk == "cat":
+            self.out_channels = num_layers * hidden_channels
         else:
-            if jk == "cat":
-                self.out_channels = num_layers * hidden_channels
-            else:
-                self.out_channels = hidden_channels
+            self.out_channels = hidden_channels
 
     def reset_parameters(self):
         for conv in self.convs:
@@ -253,10 +252,10 @@ class AttentivePka(AttentiveFP):
         nr_of_lin_layers: int,
         embeding_size: int,
     ):
-        lins = []
-        lins.append(Linear(input_dim, embeding_size))
-        for _ in range(2, nr_of_lin_layers):
-            lins.append(Linear(embeding_size, embeding_size))
+        lins = [Linear(input_dim, embeding_size)]
+        lins.extend(
+            Linear(embeding_size, embeding_size) for _ in range(2, nr_of_lin_layers)
+        )
         lins.append(Linear(embeding_size, 1))
         return ModuleList(lins)
 
@@ -292,10 +291,10 @@ class GATpKa(GAT):
         nr_of_lin_layers: int,
         embeding_size: int,
     ):
-        lins = []
-        lins.append(Linear(input_dim, embeding_size))
-        for _ in range(2, nr_of_lin_layers):
-            lins.append(Linear(embeding_size, embeding_size))
+        lins = [Linear(input_dim, embeding_size)]
+        lins.extend(
+            Linear(embeding_size, embeding_size) for _ in range(2, nr_of_lin_layers)
+        )
         lins.append(Linear(embeding_size, 1))
         return ModuleList(lins)
 
@@ -332,10 +331,10 @@ class GINpKa(GIN):
         nr_of_lin_layers: int,
         embeding_size: int,
     ):
-        lins = []
-        lins.append(Linear(input_dim, embeding_size))
-        for _ in range(2, nr_of_lin_layers):
-            lins.append(Linear(embeding_size, embeding_size))
+        lins = [Linear(input_dim, embeding_size)]
+        lins.extend(
+            Linear(embeding_size, embeding_size) for _ in range(2, nr_of_lin_layers)
+        )
         lins.append(Linear(embeding_size, embeding_size))
         return ModuleList(lins)
 
@@ -358,26 +357,25 @@ class GCN(torch.nn.Module):
         nr_of_lin_layers: int,
         embeding_size: int,
     ):
-        lins = []
-        lins.append(Linear(input_dim, embeding_size))
-        for _ in range(2, nr_of_lin_layers):
-            lins.append(Linear(embeding_size, embeding_size))
+        lins = [Linear(input_dim, embeding_size)]
+        lins.extend(
+            Linear(embeding_size, embeding_size) for _ in range(2, nr_of_lin_layers)
+        )
         lins.append(Linear(embeding_size, 1))
         return ModuleList(lins)
 
     @staticmethod
     def _return_conv(num_node_features, nr_of_layers, embeding_size):
-        convs = []
-        convs.append(GCNConv(num_node_features, embeding_size))
-        for _ in range(1, nr_of_layers):
-            convs.append(GCNConv(embeding_size, embeding_size))
+        convs = [GCNConv(num_node_features, embeding_size)]
+        convs.extend(
+            GCNConv(embeding_size, embeding_size) for _ in range(1, nr_of_layers)
+        )
         return ModuleList(convs)
 
     @staticmethod
     def _return_nnconv(
         num_node_features, num_edge_features, nr_of_layers, embeding_size
     ):
-        convs = []
         nn1 = Sequential(
             Linear(num_edge_features, embeding_size),
             ReLU(),
@@ -388,9 +386,10 @@ class GCN(torch.nn.Module):
             ReLU(),
             Linear(embeding_size, embeding_size * embeding_size),
         )
-        convs.append(NNConv(num_node_features, embeding_size, nn=nn1))
-        for _ in range(1, nr_of_layers):
-            convs.append(NNConv(embeding_size, embeding_size, nn=nn2))
+        convs = [NNConv(num_node_features, embeding_size, nn=nn1)]
+        convs.extend(
+            NNConv(embeding_size, embeding_size, nn=nn2) for _ in range(1, nr_of_layers)
+        )
         return ModuleList(convs)
 
 
@@ -612,11 +611,7 @@ class GCNPairArchitectureV2(GCN):
             num_node_features, nr_of_layers=nr_of_layers, embeding_size=hidden_channels
         )
 
-        if self.attention:
-            input_dim = hidden_channels
-        else:
-            input_dim = hidden_channels
-
+        input_dim = hidden_channels
         self.lins_d = GCN._return_lin(
             input_dim=input_dim,
             nr_of_lin_layers=2,
@@ -1371,17 +1366,16 @@ def save_checkpoint(
     )
 
     # save performance of best model evaluated on validation set
-    if epoch != 0:
-        if validation_loss < min(all_validation_loss[:-1]):
-            torch.save(
-                {
-                    "epoch": performance["epoch"],
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "loss": validation_loss,
-                },
-                f"{path}/{prefix}best_model.pt",
-            )
+    if epoch != 0 and validation_loss < min(all_validation_loss[:-1]):
+        torch.save(
+            {
+                "epoch": performance["epoch"],
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "loss": validation_loss,
+            },
+            f"{path}/{prefix}best_model.pt",
+        )
 
 
 def gcn_full_training(
@@ -1412,9 +1406,7 @@ def gcn_full_training(
     from torch import optim
 
     pbar = tqdm(range(model.checkpoint["epoch"], NUM_EPOCHS + 1), desc="Epoch: ")
-    results = {}
-    results["training-set"] = []
-    results["validation-set"] = []
+    results = {"training-set": [], "validation-set": []}
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, patience=150, verbose=True, factor=0.5
     )

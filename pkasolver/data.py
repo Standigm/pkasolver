@@ -46,12 +46,11 @@ def load_data(base: str = "data/Baltruschat") -> dict:
     sdf_filepath_novartis = f"{base}/novartis_cleaned_mono_unique_notraindata.sdf"
     sdf_filepath_Literture = f"{base}/AvLiLuMoVe_cleaned_mono_unique_notraindata.sdf"
 
-    datasets = {
+    return {
         "Training": sdf_filepath_training,
         "Novartis": sdf_filepath_novartis,
         "Literature": sdf_filepath_Literture,
     }
-    return datasets
 
 
 # data preprocessing functions - helpers
@@ -319,9 +318,7 @@ def make_nodes(mol: Chem.rdchem.Mol, atom_idx: int, n_features: dict) -> torch.T
     """
     x = []
     for atom in mol.GetAtoms():
-        node = []
-        for feat in n_features.values():
-            node.append(feat(atom, atom_idx))
+        node = [feat(atom, atom_idx) for feat in n_features.values()]
         node = list(flatten(node))
         x.append(node)
     return torch.tensor(np.array([np.array(xi) for xi in x]), dtype=torch.float)
@@ -351,25 +348,23 @@ def make_edges_and_attr(
     edges = []
     edge_attr = []
     for bond in mol.GetBonds():
-        edges.append(
-            np.array(
-                [
-                    [bond.GetBeginAtomIdx()],
-                    [bond.GetEndAtomIdx()],
-                ]
+        edges.extend(
+            (
+                np.array(
+                    [
+                        [bond.GetBeginAtomIdx()],
+                        [bond.GetEndAtomIdx()],
+                    ]
+                ),
+                np.array(
+                    [
+                        [bond.GetEndAtomIdx()],
+                        [bond.GetBeginAtomIdx()],
+                    ]
+                ),
             )
         )
-        edges.append(
-            np.array(
-                [
-                    [bond.GetEndAtomIdx()],
-                    [bond.GetBeginAtomIdx()],
-                ]
-            )
-        )
-        edge = []
-        for feat in e_features.values():
-            edge.append(feat(bond))
+        edge = [feat(bond) for feat in e_features.values()]
         edge = list(flatten(edge))
         edge_attr.extend([edge] * 2)
 
@@ -467,7 +462,7 @@ def mol_to_paired_mol_data(
         deprot, atom_idx, n_features, e_features
     )
 
-    data = PairData(
+    return PairData(
         edge_index_p=edge_index_p,
         edge_attr_p=edge_attr_p,
         x_p=node_p,
@@ -477,7 +472,6 @@ def mol_to_paired_mol_data(
         x_d=node_d,
         charge_d=charge_d,
     )
-    return data
 
 
 def mol_to_single_mol_data(

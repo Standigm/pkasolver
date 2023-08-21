@@ -244,7 +244,7 @@ def test_fumaric_acid():
     assert Chem.MolToSmiles(state.deprotonated_mol) == "O=C([O-])/C=C/C(=O)O"
     assert np.isclose(state.pka, 3.4965454959869384)
     assert np.isclose(state.pka_stddev, 0.2759701082882589)
-    assert state.reaction_center_idx == 2 or state.reaction_center_idx == 7
+    assert state.reaction_center_idx in [2, 7]
     ################################################
     protonation_state = 1
     state = protonation_states[protonation_state]
@@ -255,7 +255,7 @@ def test_fumaric_acid():
     assert Chem.MolToSmiles(state.deprotonated_mol) == "O=C([O-])/C=C/C(=O)[O-]"
     assert np.isclose(state.pka, 4.7557164001464844)
     assert np.isclose(state.pka_stddev, 0.1737669293869924)
-    assert state.reaction_center_idx == 2 or state.reaction_center_idx == 7
+    assert state.reaction_center_idx in [2, 7]
 
 
 @pytest.mark.skipif(
@@ -364,7 +364,7 @@ def test_citric_acid():
     )
     assert np.isclose(state.pka, 3.91278226852417)
     assert np.isclose(state.pka_stddev, 0.18345246870885148)
-    assert state.reaction_center_idx == 2 or state.reaction_center_idx == 9
+    assert state.reaction_center_idx in [2, 9]
 
     ################################################
     protonation_state = 2
@@ -380,7 +380,7 @@ def test_citric_acid():
     assert np.isclose(state.pka, 4.602454824447632)
     assert np.isclose(state.pka_stddev, 0.22445990740843338)
 
-    assert state.reaction_center_idx == 9 or state.reaction_center_idx == 2
+    assert state.reaction_center_idx in [9, 2]
     ################################################
     protonation_state = 3
     state = protonation_states[protonation_state]
@@ -782,9 +782,7 @@ def test_diphonoethane():
     assert Chem.MolToSmiles(state.deprotonated_mol) == "CC(O)(P(=O)([O-])O)P(=O)(O)O"
     assert np.isclose(state.pka, 1.6972961282730104)
     assert np.isclose(state.pka_stddev, 0.39150291555536587)
-    assert (
-        state.reaction_center_idx == 9 or state.reaction_center_idx == 5
-    )  # symmetric mol
+    assert state.reaction_center_idx in [9, 5]
     ################################################
     protonation_state = 1
     state = protonation_states[protonation_state]
@@ -793,9 +791,7 @@ def test_diphonoethane():
     assert Chem.MolToSmiles(state.deprotonated_mol) == "CC(O)(P(=O)([O-])O)P(=O)([O-])O"
     assert np.isclose(state.pka, 2.4382746505737303)
     assert np.isclose(state.pka_stddev, 0.2560998882164273)
-    assert (
-        state.reaction_center_idx == 9 or state.reaction_center_idx == 5
-    )  # symmetric mol
+    assert state.reaction_center_idx in [9, 5]
     ################################################
     protonation_state = 2
     state = protonation_states[protonation_state]
@@ -806,7 +802,7 @@ def test_diphonoethane():
     )
     assert np.isclose(state.pka, 5.742288055419922)
     assert np.isclose(state.pka_stddev, 0.8135513898177413)
-    assert state.reaction_center_idx == 6 or state.reaction_center_idx == 10
+    assert state.reaction_center_idx in [6, 10]
     ################################################
     protonation_state = 3
     state = protonation_states[protonation_state]
@@ -820,7 +816,7 @@ def test_diphonoethane():
     )
     assert np.isclose(state.pka, 10.390039710998535)
     assert np.isclose(state.pka_stddev, 0.6905222291846247)
-    assert state.reaction_center_idx == 10 or state.reaction_center_idx == 6
+    assert state.reaction_center_idx in [10, 6]
     ################################################
 
 
@@ -1079,7 +1075,7 @@ def test_mol_00():
     )
     assert np.isclose(state.pka, 1.622351369857788)
     assert np.isclose(state.pka_stddev, 0.38105998542367125)
-    assert state.reaction_center_idx == 21 or state.reaction_center_idx == 0
+    assert state.reaction_center_idx in [21, 0]
     ################################################
     protonation_state = 1
     state = protonation_states[protonation_state]
@@ -1094,7 +1090,7 @@ def test_mol_00():
     )
     assert np.isclose(state.pka, 2.079871563911438)
     assert np.isclose(state.pka_stddev, 0.48864702887959693)
-    assert state.reaction_center_idx == 21 or state.reaction_center_idx == 0
+    assert state.reaction_center_idx in [21, 0]
     ################################################
     protonation_state = 2
     state = protonation_states[protonation_state]
@@ -1109,7 +1105,7 @@ def test_mol_00():
 
     assert np.isclose(state.pka, 11.906086082458495)
     assert np.isclose(state.pka_stddev, 0.5356310747117345)
-    assert state.reaction_center_idx == 21 or state.reaction_center_idx == 0
+    assert state.reaction_center_idx in [21, 0]
     ################################################
     protonation_state = 3
     state = protonation_states[protonation_state]
@@ -1125,7 +1121,7 @@ def test_mol_00():
 
     assert np.isclose(state.pka, 12.231420288085937)
     assert np.isclose(state.pka_stddev, 0.5061111726042535)
-    assert state.reaction_center_idx == 21 or state.reaction_center_idx == 0
+    assert state.reaction_center_idx in [21, 0]
 
     print("#####################################################")
     print("#####################################################")
@@ -1371,7 +1367,7 @@ def test_mol_70():
     )
     assert np.isclose(state.pka, 8.504621658325195)
     assert np.isclose(state.pka_stddev, 0.21493671292423686)
-    assert state.reaction_center_idx == 0 or state.reaction_center_idx == 11
+    assert state.reaction_center_idx in [0, 11]
 
     ################################################
     protonation_state = 1
@@ -1386,7 +1382,7 @@ def test_mol_70():
     )
     assert np.isclose(state.pka, 9.089583587646484)
     assert np.isclose(state.pka_stddev, 0.17076031530766353)
-    assert state.reaction_center_idx == 11 or state.reaction_center_idx == 0
+    assert state.reaction_center_idx in [11, 0]
 
 
 @pytest.mark.skipif(

@@ -29,13 +29,12 @@ def dataset_to_dataloader(
 
 
 def get_device(device_str: str) -> torch.device:
-    if device_str == "cuda":
+    if device_str == "cpu":
+        return torch.device("cpu")
+    elif device_str == "cuda":
         if torch.cuda.is_available():
             return torch.device("cuda")
-        else:
-            logger.warning("CUDA is not available, using CPU instead")
-            return torch.device("cpu")
-    elif device_str == "cpu":
+        logger.warning("CUDA is not available, using CPU instead")
         return torch.device("cpu")
     else:
         raise ValueError(f"Unknown device {device_str}")

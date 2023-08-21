@@ -1,7 +1,4 @@
-import numpy as np
 from rdkit import Chem
-from rdkit.Chem.rdchem import ResonanceMolSupplier
-from rdkit.Chem.AllChem import GetMorganFingerprintAsBitVect
 import tqdm
 
 in_path = "/data/shared/projects/pkasolver-data/00_experimental_training_datasets.sdf"
@@ -13,11 +10,11 @@ def main():
         with open(in_path, "rb") as fh:
             suppl = Chem.ForwardSDMolSupplier(fh, removeHs=True)
             i = 0
+            pH = 7.4
             for mol in tqdm.tqdm(suppl):
                 props = mol.GetPropsAsDict()
-                pka = props["pKa"]
                 # pka = props["marvin_pKa"]
-                pH = 7.4
+                pka = props["pKa"]
                 mol = Chem.RWMol(mol)
                 atom = mol.GetAtomWithIdx(props["marvin_atom"])
                 charge = atom.GetFormalCharge()

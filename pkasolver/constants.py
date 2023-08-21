@@ -15,7 +15,9 @@ SEED = 42
 # Defining Smarts patterns used to calculate some node and edge features
 rotatable_bond = "[!$(*#*)&!D1]-&!@[!$(*#*)&!D1]"
 # any good? https://rdkit-discuss.narkive.com/4o99LqS6/rotatable-bonds-amide-bonds-and-smarts
-rotatable_bond_no_amide = "[!$([NH]!@C(=O))&!D1&!$(*#*)]-&!@[!$([NH]!@C(=O))&!D1&!$(*#*)]"
+rotatable_bond_no_amide = (
+    "[!$([NH]!@C(=O))&!D1&!$(*#*)]-&!@[!$([NH]!@C(=O))&!D1&!$(*#*)]"
+)
 
 amide = "[NX3][CX3](=[OX1])[#6]"
 keton = "[CX3]=[OX1]"
