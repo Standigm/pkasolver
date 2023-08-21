@@ -723,7 +723,6 @@ def iterate_over_acids(
     for idx, acid_prop in enumerate(
         reversed(acidic_mols_properties)
     ):  # list must be iterated in reverse, in order to protonated the strongest conjugate base first
-
         if skipping_acids == 0:  # if a acid was skipped, all further acids are skipped
             try:
                 new_mol = create_conjugate(

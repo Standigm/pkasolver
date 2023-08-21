@@ -47,7 +47,6 @@ def calculate_performance_of_model_on_data(
     model.eval()
     y_dataset, x_dataset = [], []
     for data in loader:  # Iterate in batches over the training dataset.
-
         data.to(device=DEVICE)
         y_pred = (
             model(
@@ -65,5 +64,3 @@ def calculate_performance_of_model_on_data(
         x_dataset.extend(ref.detach().tolist())
 
     return np.array(x_dataset), np.array(y_dataset)
-
-

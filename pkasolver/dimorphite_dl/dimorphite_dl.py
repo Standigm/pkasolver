@@ -110,7 +110,8 @@ def main(params=None):
 
 class MyParser(argparse.ArgumentParser):
     """Overwrite default parse so it displays help file on error. See
-    https://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu"""
+    https://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
+    """
 
     def error(self, message):
         """Overwrites the default error message.
@@ -134,15 +135,13 @@ class MyParser(argparse.ArgumentParser):
         if file is None:
             file = sys.stdout
         self._print_message(self.format_help(), file)
-        print(
-            """
+        print("""
 examples:
   python dimorphite_dl.py --smiles_file sample_molecules.smi
   python dimorphite_dl.py --smiles "CCC(=O)O" --min_ph -3.0 --max_ph -2.0
   python dimorphite_dl.py --smiles "CCCN" --min_ph -3.0 --max_ph -2.0 --output_file output.smi
   python dimorphite_dl.py --smiles_file sample_molecules.smi --pka_precision 2.0 --label_states
-  python dimorphite_dl.py --test"""
-        )
+  python dimorphite_dl.py --test""")
         print("")
 
 
@@ -308,7 +307,7 @@ class UtilFuncs:
             [
                 "[H]-[N:1]-[N:2]#[N:3]",
                 "[N:1]=[N+1:2]=[N:3]-[H]",
-            ]  # To handle bad azide. R-N-N#N should
+            ],  # To handle bad azide. R-N-N#N should
             # be R-N=[N+]=N
         ]
 
@@ -913,7 +912,10 @@ class ProtSubstructFuncs:
                 try:
                     mol_copy = Chem.RemoveHs(mol_copy)
                 except:
-                    if "silent" in ProtSubstructFuncs.args and not ProtSubstructFuncs.args["silent"]:
+                    if (
+                        "silent" in ProtSubstructFuncs.args
+                        and not ProtSubstructFuncs.args["silent"]
+                    ):
                         UtilFuncs.eprint(
                             "WARNING: Skipping poorly formed SMILES string: "
                             + Chem.MolToSmiles(mol_copy)
@@ -1124,7 +1126,7 @@ class TestFuncs:
             "pka_precision": 0.5,
             "smiles": "",
             "label_states": True,
-            "silent": True
+            "silent": True,
         }
 
         for smi, protonated, deprotonated, category in smis:
@@ -1268,7 +1270,7 @@ class TestFuncs:
                             "min_ph": ph,
                             "max_ph": ph,
                             "pka_precision": 0,
-                            "silent": True
+                            "silent": True,
                         }
                     )
                 )

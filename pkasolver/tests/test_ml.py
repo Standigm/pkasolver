@@ -1,11 +1,21 @@
 import torch
 from pkasolver.constants import DEVICE, edge_feat_values
 from pkasolver.data import calculate_nr_of_features
-from pkasolver.ml_architecture import (GATPair, GATProt, GCNDeprot,
-                                       GCNPairSingleConv, GCNPairTwoConv,
-                                       GCNProt, GINPairV1, GINPairV2,
-                                       GINPairV3, GINProt, NNConvDeprot,
-                                       NNConvPair, NNConvProt)
+from pkasolver.ml_architecture import (
+    GATPair,
+    GATProt,
+    GCNDeprot,
+    GCNPairSingleConv,
+    GCNPairTwoConv,
+    GCNProt,
+    GINPairV1,
+    GINPairV2,
+    GINPairV3,
+    GINProt,
+    NNConvDeprot,
+    NNConvPair,
+    NNConvProt,
+)
 
 models = [
     ("GCNPairSingleConv", GCNPairSingleConv),
@@ -20,7 +30,6 @@ models = [
 
 
 def test_init_gcn_models():
-
     #################
     # test single models
     for model_name, model_class in models:
@@ -31,8 +40,7 @@ def test_init_gcn_models():
 
 
 def test_train_gcn_models():
-    from pkasolver.data import (load_data, make_pyg_dataset_from_dataframe,
-                                preprocess)
+    from pkasolver.data import load_data, make_pyg_dataset_from_dataframe, preprocess
     from pkasolver.ml import dataset_to_dataloader
     from pkasolver.ml_architecture import gcn_test, gcn_train
 
@@ -125,8 +133,7 @@ new_models = [
 
 
 def test_train_new_models():
-    from pkasolver.data import (load_data, make_pyg_dataset_from_dataframe,
-                                preprocess)
+    from pkasolver.data import load_data, make_pyg_dataset_from_dataframe, preprocess
     from pkasolver.ml import dataset_to_dataloader
     from pkasolver.ml_architecture import gcn_test, gcn_train
 
@@ -185,8 +192,7 @@ new_models = [
 
 
 def test_only_GINPairV1_and_GINPairV3_models():
-    from pkasolver.data import (load_data, make_pyg_dataset_from_dataframe,
-                                preprocess)
+    from pkasolver.data import load_data, make_pyg_dataset_from_dataframe, preprocess
     from pkasolver.ml import dataset_to_dataloader
     from pkasolver.ml_architecture import gcn_test, gcn_train
 
@@ -257,8 +263,7 @@ def test_only_GINProt_models():
         ("GINProt", GINProt),
     ]
 
-    from pkasolver.data import (load_data, make_pyg_dataset_from_dataframe,
-                                preprocess)
+    from pkasolver.data import load_data, make_pyg_dataset_from_dataframe, preprocess
     from pkasolver.ml import dataset_to_dataloader
     from pkasolver.ml_architecture import gcn_test, gcn_train
 
@@ -324,7 +329,6 @@ def test_only_GINProt_models():
 
 
 def test_count_nr_of_parameters():
-
     import torch.nn.functional as F
     from torch.nn import Linear, ModuleList
 
@@ -342,7 +346,6 @@ def test_count_nr_of_parameters():
 
 
 def test_count_nr_of_parameters_for_GIN():
-
     import torch.nn.functional as F
     from torch_geometric.nn.models import GAT, GIN, AttentiveFP
 

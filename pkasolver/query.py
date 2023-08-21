@@ -62,7 +62,6 @@ selected_edge_features = make_features_dicts(EDGE_FEATURES, edge_feat_list)
 
 class QueryModel:
     def __init__(self):
-
         self.models = []
 
         for i in range(25):
@@ -134,7 +133,6 @@ def _get_ionization_indices(mol_list: list, compare_to: Chem.Mol) -> list:
 
     list_of_reaction_centers = []
     for idx, m2 in enumerate(mol_list):
-
         m1 = compare_to
         assert m1.GetNumAtoms() == m2.GetNumAtoms()
 
@@ -215,7 +213,8 @@ def _sort_conj(mols: list):
     ]
     if abs(nr_of_hydrogen[0] - nr_of_hydrogen[1]) != 1:
         raise RuntimeError(
-            "Neighboring protonation states are only allowed to have a difference of a single hydrogen."
+            "Neighboring protonation states are only allowed to have a difference of a"
+            " single hydrogen."
         )
     mols_sorted = [
         x for _, x in sorted(zip(nr_of_hydrogen, mols), reverse=True)
@@ -319,7 +318,10 @@ def calculate_microstate_pka_values(
             for i in used_reaction_center_atom_idxs:
                 try:
                     conj = create_conjugate(
-                        mol_at_state, i, pka=0.0, known_pka_values=False,
+                        mol_at_state,
+                        i,
+                        pka=0.0,
+                        known_pka_values=False,
                     )
                 except:
                     continue
@@ -472,7 +474,6 @@ def draw_pka_map(protonation_states: list, size=(450, 450)):
     """draw mol at pH=7.0 and indicate protonation sites with respectiv pKa values"""
     mol_at_ph_7 = deepcopy(protonation_states[0].ph7_mol)
     for protonation_state in range(len(protonation_states)):
-
         state = protonation_states[protonation_state]
         atom = mol_at_ph_7.GetAtomWithIdx(state.reaction_center_idx)
         try:
@@ -493,7 +494,6 @@ def draw_pka_reactions(
 
     draw_pairs, pair_atoms, legend = [], [], []
     for i in range(len(protonation_states)):
-
         state = protonation_states[i]
 
         draw_pairs.extend([state.protonated_mol, state.deprotonated_mol])

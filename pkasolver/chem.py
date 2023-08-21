@@ -14,12 +14,11 @@ def create_conjugate(
     ignore_danger: bool = False,
     known_pka_values: bool = True,
 ) -> Chem.rdchem.Mol:
-
     """Create the conjugated base/acid of the input molecule depending on if the input molecule is the protonated or
     deprotonated molecule in the acid-base reaction. This is inferred from the pka and pH input.
-    If the resulting molecule is illegal, e.g. has negative number of protons on a heavy atom, or highly unlikely, 
+    If the resulting molecule is illegal, e.g. has negative number of protons on a heavy atom, or highly unlikely,
     e.g. atom charge of +2 or -2, the opposite ionization state is returned instead
-    
+
     Parameters
     ----------
     mol_initial
@@ -73,7 +72,8 @@ def create_conjugate(
 
     else:
         raise RuntimeError(
-            f"pka: {pka},charge:{charge},Explicit Hs:{Ex_Hs}, Total Hs:{Tot_Hs}, reaction center atomic number: {atom.GetAtomicNum()}"
+            f"pka: {pka},charge:{charge},Explicit Hs:{Ex_Hs}, Total Hs:{Tot_Hs},"
+            f" reaction center atomic number: {atom.GetAtomicNum()}"
         )
     atom.UpdatePropertyCache()
 
@@ -91,7 +91,9 @@ def create_conjugate(
         logger.debug(f"Original mol: {Chem.MolToSmiles(mol)}")
         logger.debug(f"Changed mol: {Chem.MolToSmiles(mol_changed)}")
         logger.debug(
-            f"This should only happen for the test set. pka: {pka},charge:{charge},Explicit Hs:{Ex_Hs}, Total Hs:{Tot_Hs}, reaction center atomic number: {atom.GetAtomicNum()}"
+            "This should only happen for the test set. pka:"
+            f" {pka},charge:{charge},Explicit Hs:{Ex_Hs}, Total Hs:{Tot_Hs}, reaction"
+            f" center atomic number: {atom.GetAtomicNum()}"
         )
         raise RuntimeError("danger")
     return mol_changed

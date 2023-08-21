@@ -6,8 +6,12 @@ import numpy as np
 import pytest
 import torch
 from pkasolver.constants import EDGE_FEATURES, NODE_FEATURES
-from pkasolver.data import (load_data, make_edges_and_attr,
-                            make_features_dicts, make_nodes)
+from pkasolver.data import (
+    load_data,
+    make_edges_and_attr,
+    make_features_dicts,
+    make_nodes,
+)
 from rdkit import Chem
 
 # for local tests using scripts from pkasolver-data repo
@@ -54,7 +58,6 @@ def test_aspirin_pka_split():
     reason="Skipping tests that cannot pass in github actions",
 )
 def test_eltrombopag_pka_split():
-
     o = subprocess.run(
         [
             "python",
@@ -109,7 +112,6 @@ def test_eltrombopag_pka_split():
     reason="Skipping tests that cannot pass in github actions",
 )
 def test_edta_pka_split():
-
     o = subprocess.run(
         [
             "python",
@@ -168,7 +170,6 @@ def test_edta_pka_split():
     reason="Skipping tests that cannot pass in github actions",
 )
 def test_exp_sets_generation():
-
     o = subprocess.run(
         [
             "python",
@@ -227,7 +228,6 @@ def test_exp_sets_generation():
     reason="Skipping tests that cannot pass in github actions",
 )
 def test_data_preprocessing_for_baltruschat():
-
     o = subprocess.run(
         [
             "python",
@@ -572,8 +572,11 @@ def test_generate_data_intances():
     """Test that data classes instances are created correctly"""
     import torch
     from pkasolver.chem import create_conjugate
-    from pkasolver.data import (make_paired_pyg_data_from_mol,
-                                mol_to_paired_mol_data, mol_to_single_mol_data)
+    from pkasolver.data import (
+        make_paired_pyg_data_from_mol,
+        mol_to_paired_mol_data,
+        mol_to_single_mol_data,
+    )
 
     sdf_filepaths = load_data()
     suppl = Chem.ForwardSDMolSupplier(sdf_filepaths["Training"], removeHs=True)
@@ -613,7 +616,13 @@ def test_generate_data_intances():
             assert charge1 == 1
             assert charge2 == 0
 
-            d3 = mol_to_paired_mol_data(prot, deprot, atom_idx, n_feat, e_feat,)
+            d3 = mol_to_paired_mol_data(
+                prot,
+                deprot,
+                atom_idx,
+                n_feat,
+                e_feat,
+            )
             # all of them have the same number of nodes
             assert d1.num_nodes == d2.num_nodes == len(d3.x_p) == len(d3.x_d)
             # but different node features
@@ -638,7 +647,13 @@ def test_generate_data_intances():
 
             d1, charge1 = mol_to_single_mol_data(mol, atom_idx, n_feat, e_feat)
             d2, charge2 = mol_to_single_mol_data(conj, atom_idx, n_feat, e_feat)
-            d3 = mol_to_paired_mol_data(mol, conj, atom_idx, n_feat, e_feat,)
+            d3 = mol_to_paired_mol_data(
+                mol,
+                conj,
+                atom_idx,
+                n_feat,
+                e_feat,
+            )
             assert (
                 Chem.MolToSmiles(mol)
                 == "CCCN(CCC)C(=O)c1cc(C)cc(C(=O)N[C@@H](Cc2cc(F)cc(F)c2)[C@H](O)[C@@H]2[NH2+]CCN(Cc3ccccc3)C2=O)c1"
@@ -664,7 +679,6 @@ def test_generate_data_intances():
 
 
 def test_generate_dataset_from_sdf():
-
     from copy import deepcopy
 
     from pkasolver.data import iterate_over_acids, iterate_over_bases
@@ -684,7 +698,6 @@ def test_generate_dataset_from_sdf():
         suppl = Chem.ForwardSDMolSupplier(fh, removeHs=True)
 
         for nr_of_mols, mol in enumerate(suppl):
-
             props = mol.GetPropsAsDict()
             pkas = []
             pkas.append(
@@ -802,12 +815,14 @@ def test_generate_dataset_from_sdf():
                     pka = mol1.GetProp("pKa")
                     counter = mol1.GetProp("INTERNAL_ID")
                     print(
-                        f"{counter=}, {pka=}, {mol1.GetProp('mol-smiles')}, prot, {mol1.GetProp('epik_atom')}"
+                        f"{counter=}, {pka=}, {mol1.GetProp('mol-smiles')}, prot,"
+                        f" {mol1.GetProp('epik_atom')}"
                     )
                     pka = mol2.GetProp("pKa")
                     counter = mol2.GetProp("INTERNAL_ID")
                     print(
-                        f"{counter=}, {pka=}, {mol2.GetProp('mol-smiles')}, deprot, {mol1.GetProp('epik_atom')}"
+                        f"{counter=}, {pka=}, {mol2.GetProp('mol-smiles')}, deprot,"
+                        f" {mol1.GetProp('epik_atom')}"
                     )
 
                 if chembl_id in all_protonation_states_enumerated.keys():

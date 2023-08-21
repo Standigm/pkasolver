@@ -21,4 +21,3 @@ mol = run_with_mol_list(
     pka_precision=float(args.pka_precision),
 )
 pickle.dump(mol, open("test.pkl", "wb"))
-
