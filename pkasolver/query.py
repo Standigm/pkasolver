@@ -14,13 +14,13 @@ from rdkit.Chem import Draw
 from torch_geometric.loader import DataLoader
 
 from pkasolver.chem import create_conjugate
-from pkasolver.constants import DEVICE, EDGE_FEATURES, NODE_FEATURES
+from pkasolver.constants import EDGE_FEATURES, NODE_FEATURES
 from pkasolver.data import (
     calculate_nr_of_features,
     make_features_dicts,
     mol_to_paired_mol_data,
 )
-from pkasolver.ml import dataset_to_dataloader
+from pkasolver.ml import dataset_to_dataloader, get_device
 from pkasolver.ml_architecture import GINPairV1
 
 
@@ -61,27 +61,26 @@ selected_edge_features = make_features_dicts(EDGE_FEATURES, edge_feat_list)
 
 
 class QueryModel:
-    def __init__(self):
+    def __init__(self, device_str: str = "cuda") -> None:
         self.models = []
+        self.device = get_device(device_str)
 
         for i in range(25):
             model = GINPairV1(
-                num_node_features, num_edge_features, hidden_channels=96
+                num_node_features,
+                num_edge_features,
+                hidden_channels=96,
+                device_str=device_str,
             )
             base_path = path.dirname(__file__)
-            if not torch.cuda.is_available():
-                checkpoint = torch.load(
-                    f"{base_path}/trained_model_without_epik/best_model_{i}.pt",
-                    map_location=torch.device("cpu"),
-                )
-            else:
-                checkpoint = torch.load(
-                    f"{base_path}/trained_model_without_epik/best_model_{i}.pt"
-                )
+            checkpoint = torch.load(
+                f"{base_path}/trained_model_without_epik/best_model_{i}.pt",
+                map_location=self.device,
+            )
 
             model.load_state_dict(checkpoint["model_state_dict"])
             model.eval()
-            model.to(device=DEVICE)
+            model.to(device=self.device)
             self.models.append(model)
 
     def predict_pka_value(self, loader: DataLoader) -> np.ndarray:
@@ -98,7 +97,7 @@ class QueryModel:
         results = []
         assert len(loader) == 1
         for data in loader:  # Iterate in batches over the training dataset.
-            data.to(device=DEVICE)
+            data.to(device=self.device)
             consensus_r = []
             for model in self.models:
                 y_pred = (
@@ -131,7 +130,7 @@ def _get_ionization_indices(mol_list: list, compare_to: Chem.Mol) -> list:
     from rdkit.Chem import rdFMCS
 
     list_of_reaction_centers = []
-    for idx, m2 in enumerate(mol_list):
+    for m2 in mol_list:
         m1 = compare_to
         assert m1.GetNumAtoms() == m2.GetNumAtoms()
 
@@ -155,8 +154,6 @@ def _get_ionization_indices(mol_list: list, compare_to: Chem.Mol) -> list:
                 m1.GetAtomWithIdx(i).GetFormalCharge()
                 != m2.GetAtomWithIdx(j).GetFormalCharge()
             ):
-                if i != j:  # matching not sucessfull
-                    logger.warning("Trouble ahead ... different atom indices detected.")
                 list_of_reaction_centers.append(i)
 
     logger.debug(set(list_of_reaction_centers))
@@ -182,12 +179,14 @@ def _call_dimorphite_dl(
     # save properties
     _ = mol.GetPropsAsDict()
 
+    # only most probable tautomer generated
+    # don't adjust the ionization state of the molecule
     o = subprocess.run(
         [
             "python",
             f"{path_to_script}/scripts/call_dimorphite_dl.py",
-            "--smiles",  # only most probable tautomer generated
-            f"{smiles}",  # don't adjust the ionization state of the molecule
+            "--smiles",
+            f"{smiles}",
             "--min_ph",
             f"{min_ph}",
             "--max_ph",
@@ -215,9 +214,8 @@ def _sort_conj(mols: list):
             "Neighboring protonation states are only allowed to have a difference of a"
             " single hydrogen."
         )
-    mols_sorted = [
-        x for _, x in sorted(zip(nr_of_hydrogen, mols), reverse=True)
-    ]  # https://stackoverflow.com/questions/6618515/sorting-list-based-on-values-from-another-list
+    # https://stackoverflow.com/questions/6618515/sorting-list-based-on-values-from-another-list
+    mols_sorted = [x for _, x in sorted(zip(nr_of_hydrogen, mols), reverse=True)]
     return mols_sorted
 
 
@@ -233,12 +231,15 @@ def _check_for_duplicates(states: list):
 
 
 def calculate_microstate_pka_values(
-    mol: Chem.rdchem.Mol, only_dimorphite: bool = False, query_model=None
+    mol: Chem.rdchem.Mol,
+    only_dimorphite: bool = False,
+    query_model=None,
+    device_str: str = "cuda",
 ):
     """Enumerate protonation states using a rdkit mol as input"""
 
     if query_model is None:
-        query_model = QueryModel()
+        query_model = QueryModel(device_str=device_str)
 
     if only_dimorphite:
         print(

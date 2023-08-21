@@ -10,9 +10,7 @@ NUM_THREADS = 1
 torch.set_num_threads(NUM_THREADS)
 logger.debug(f"Setting num threads to {NUM_THREADS}")
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 42
-logger.debug(f"Pytorch will use {DEVICE}")
 
 # Defining Smarts patterns used to calculate some node and edge features
 rotatable_bond = "[!$(*#*)&!D1]-&!@[!$(*#*)&!D1]"
@@ -94,12 +92,13 @@ node_feat_values = {
 
 # defining helper dictionaries for generating one hot encoding of atom features
 NODE_FEATURES = {
+    # still missing to mark element that's not in the list
     "element": lambda atom, marvin_atom: list(
         map(
             lambda s: int(atom.GetAtomicNum() == s),
             node_feat_values["element"],
         )
-    ),  # still missing to mark element that's not in the list
+    ),
     "formal_charge": lambda atom, marvin_atom: list(
         map(
             lambda s: int(atom.GetFormalCharge() == s),
