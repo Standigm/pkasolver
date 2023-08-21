@@ -74,8 +74,8 @@ def main(params=None):
     parser = ArgParseFuncs.get_args()
     args = vars(parser.parse_args())
 
-    if not args["silent"]:
-        print_header()
+    # if not args["silent"]:
+    #     print_header()
 
     # Add in any parameters in params.
     if params is not None:

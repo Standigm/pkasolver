@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from operator import attrgetter
 from os import path
+from typing import Optional
 
 import cairosvg
 import numpy as np
@@ -50,8 +51,8 @@ node_feat_list = [
     "reaction_center",
     "smarts",
 ]
-
 edge_feat_list = ["bond_type", "is_conjugated", "rotatable"]
+
 num_node_features = calculate_nr_of_features(node_feat_list)
 num_edge_features = calculate_nr_of_features(edge_feat_list)
 
@@ -233,7 +234,7 @@ def _check_for_duplicates(states: list):
 def calculate_microstate_pka_values(
     mol: Chem.rdchem.Mol,
     only_dimorphite: bool = False,
-    query_model=None,
+    query_model: Optional[QueryModel] = None,
     device_str: str = "cuda",
 ):
     """Enumerate protonation states using a rdkit mol as input"""
@@ -242,7 +243,7 @@ def calculate_microstate_pka_values(
         query_model = QueryModel(device_str=device_str)
 
     if only_dimorphite:
-        print(
+        logger.warning(
             "BEWARE! This is experimental and might generate wrong protonation states."
         )
         logger.debug("Using dimorphite-dl to enumerate protonation states.")
@@ -254,9 +255,8 @@ def calculate_microstate_pka_values(
             for mol in all_mols
         ]
 
-        mols_sorted = [
-            x for _, x in sorted(zip(atom_charges, all_mols), reverse=True)
-        ]  # https://stackoverflow.com/questions/6618515/sorting-list-based-on-values-from-another-list
+        # https://stackoverflow.com/questions/6618515/sorting-list-based-on-values-from-another-list
+        mols_sorted = [x for _, x in sorted(zip(atom_charges, all_mols), reverse=True)]
 
         reaction_center_atom_idxs = _get_ionization_indices(mols_sorted, mols_sorted[0])
         # return only mol pairs
@@ -307,7 +307,7 @@ def calculate_microstate_pka_values(
 
         acids = []
         mol_at_state = deepcopy(mol_at_ph_7)
-        print(f"Proposed mol at pH 7.4: {Chem.MolToSmiles(mol_at_state)}")
+        logger.info(f"Proposed mol at pH 7.4: {Chem.MolToSmiles(mol_at_state)}")
 
         used_reaction_center_atom_idxs = deepcopy(reaction_center_atom_idxs)
         logger.debug("Start with acids ...")
@@ -379,9 +379,8 @@ def calculate_microstate_pka_values(
 
             # get the protonation state with the highest pka
             acids.append(max(states_per_iteration, key=attrgetter("pka")))
-            used_reaction_center_atom_idxs.remove(
-                acids[-1].reaction_center_idx
-            )  # avoid double protonation
+            # avoid double protonation
+            used_reaction_center_atom_idxs.remove(acids[-1].reaction_center_idx)
             mol_at_state = deepcopy(acids[-1].protonated_mol)
 
         logger.debug(acids)
@@ -446,15 +445,14 @@ def calculate_microstate_pka_values(
                 else:
                     states_per_iteration.append(pair)
 
+            # no protonation state left
             if not states_per_iteration:
-                # no protonation state left
                 break
             # take state with lowest pka value
             bases.append(min(states_per_iteration, key=attrgetter("pka")))
             mol_at_state = deepcopy(bases[-1].deprotonated_mol)
-            used_reaction_center_atom_idxs.remove(
-                bases[-1].reaction_center_idx
-            )  # avoid double deprotonation
+            # avoid double deprotonation
+            used_reaction_center_atom_idxs.remove(bases[-1].reaction_center_idx)
 
         logger.debug(bases)
         acids.reverse()
@@ -463,9 +461,7 @@ def calculate_microstate_pka_values(
         mols = _check_for_duplicates(mols)
 
     if len(mols) == 0:
-        print("#########################")
-        print("Could not identify any ionizable group. Aborting.")
-        print("#########################")
+        logger.error("Could not identify any ionizable group. Aborting.")
 
     return mols
 
@@ -508,9 +504,8 @@ def draw_pka_reactions(
         highlightAtomLists=pair_atoms,
         useSVG=True,
     )
-    if hasattr(
-        s, "data"
-    ):  # Draw.MolsToGridImage returns different output depending on whether it is called in a notebook or a script
+    # Draw.MolsToGridImage returns different output depending on whether it is called in a notebook or a script
+    if hasattr(s, "data"):
         s = s.data.replace("svg:", "")
     fig = sg.fromstring(s)
     for i, text in enumerate(legend):
