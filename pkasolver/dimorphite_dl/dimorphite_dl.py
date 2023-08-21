@@ -100,7 +100,7 @@ def main(params=None):
             with open(args["output_file"], "w") as file:
                 for protonated_smi in Protonate(args):
                     file.write(protonated_smi + "\n")
-        elif "return_as_list" in args and args["return_as_list"] == True:
+        elif "return_as_list" in args and args["return_as_list"]:
             return list(Protonate(args))
         else:
             # No output file specified. Just print it to the screen.
@@ -1044,6 +1044,43 @@ class TestFuncs:
     @staticmethod
     def test():
         """Tests all the 38 groups."""
+        smis_phos = [
+            # [input smiles,   protonated,       deprotonated1,       deprotonated2,          category]
+            ["O=P(O)(O)OCCCC", "CCCCOP(=O)(O)O", "CCCCOP(=O)([O-])O", "CCCCOP(=O)([O-])[O-]", "Phosphate"],
+            ["CC(P(O)(O)=O)C", "CC(C)P(=O)(O)O", "CC(C)P(=O)([O-])O", "CC(C)P(=O)([O-])[O-]", "Phosphonate"],
+        ]
+        # fmt: on
+
+        cats_with_two_prot_sites = [inf[4] for inf in smis_phos]
+
+        # Load the average pKa values.
+        average_pkas = {
+            l.split()[0].replace("*", ""): float(l.split()[3])
+            for l in ProtSubstructFuncs.load_substructre_smarts_file()
+            if l.split()[0] not in cats_with_two_prot_sites
+        }
+        average_pkas_phos = {
+            l.split()[0].replace("*", ""): [float(l.split()[3]), float(l.split()[6])]
+            for l in ProtSubstructFuncs.load_substructre_smarts_file()
+            if l.split()[0] in cats_with_two_prot_sites
+        }
+
+        print("Running Tests")
+        print("=============")
+        print("")
+
+        print("Very Acidic (pH -10000000)")
+        print("--------------------------")
+        print("")
+
+        args = {
+            "min_ph": -10000000,
+            "max_ph": -10000000,
+            "pka_precision": 0.5,
+            "smiles": "",
+            "label_states": True,
+            "silent": True,
+        }
 
         # fmt: off
         smis = [
@@ -1090,44 +1127,6 @@ class TestFuncs:
             # generate monoprotic compounds to test them. See Other tests
             # people...
         ]
-
-        smis_phos = [
-            # [input smiles,   protonated,       deprotonated1,       deprotonated2,          category]
-            ["O=P(O)(O)OCCCC", "CCCCOP(=O)(O)O", "CCCCOP(=O)([O-])O", "CCCCOP(=O)([O-])[O-]", "Phosphate"],
-            ["CC(P(O)(O)=O)C", "CC(C)P(=O)(O)O", "CC(C)P(=O)([O-])O", "CC(C)P(=O)([O-])[O-]", "Phosphonate"],
-        ]
-        # fmt: on
-
-        cats_with_two_prot_sites = [inf[4] for inf in smis_phos]
-
-        # Load the average pKa values.
-        average_pkas = {
-            l.split()[0].replace("*", ""): float(l.split()[3])
-            for l in ProtSubstructFuncs.load_substructre_smarts_file()
-            if l.split()[0] not in cats_with_two_prot_sites
-        }
-        average_pkas_phos = {
-            l.split()[0].replace("*", ""): [float(l.split()[3]), float(l.split()[6])]
-            for l in ProtSubstructFuncs.load_substructre_smarts_file()
-            if l.split()[0] in cats_with_two_prot_sites
-        }
-
-        print("Running Tests")
-        print("=============")
-        print("")
-
-        print("Very Acidic (pH -10000000)")
-        print("--------------------------")
-        print("")
-
-        args = {
-            "min_ph": -10000000,
-            "max_ph": -10000000,
-            "pka_precision": 0.5,
-            "smiles": "",
-            "label_states": True,
-            "silent": True,
-        }
 
         for smi, protonated, deprotonated, category in smis:
             args["smiles"] = smi

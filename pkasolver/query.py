@@ -14,6 +14,7 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import Draw
 from torch_geometric.loader import DataLoader
 
+from pkasolver import run_with_mol_list as call_dimorphite_dl
 from pkasolver.chem import create_conjugate
 from pkasolver.constants import EDGE_FEATURES, NODE_FEATURES
 from pkasolver.data import (
@@ -161,48 +162,6 @@ def _get_ionization_indices(mol_list: list, compare_to: Chem.Mol) -> list:
     return list_of_reaction_centers
 
 
-def _parse_dimorphite_dl_output():
-    import pickle
-
-    mols = pickle.load(open("test.pkl", "rb"))
-    return mols
-
-
-def _call_dimorphite_dl(
-    mol: Chem.Mol, min_ph: float, max_ph: float, pka_precision: float = 1.0
-):
-    """calls  dimorphite_dl with parameters"""
-    import subprocess
-
-    # get path to script
-    path_to_script = path.dirname(__file__)
-    smiles = Chem.MolToSmiles(mol, isomericSmiles=True)
-    # save properties
-    _ = mol.GetPropsAsDict()
-
-    # only most probable tautomer generated
-    # don't adjust the ionization state of the molecule
-    o = subprocess.run(
-        [
-            "python",
-            f"{path_to_script}/scripts/call_dimorphite_dl.py",
-            "--smiles",
-            f"{smiles}",
-            "--min_ph",
-            f"{min_ph}",
-            "--max_ph",
-            f"{max_ph}",
-            "--pka_precision",
-            f"{pka_precision}",
-        ],
-        stderr=subprocess.STDOUT,
-    )
-    o.check_returncode()
-    # get list of smiles
-    mols = _parse_dimorphite_dl_output()
-    return mols
-
-
 def _sort_conj(mols: list):
     """sort mols based on number of hydrogen"""
 
@@ -235,6 +194,7 @@ def calculate_microstate_pka_values(
     mol: Chem.rdchem.Mol,
     only_dimorphite: bool = False,
     query_model: Optional[QueryModel] = None,
+    verbose: bool = False,
     device_str: str = "cuda",
 ):
     """Enumerate protonation states using a rdkit mol as input"""
@@ -247,8 +207,8 @@ def calculate_microstate_pka_values(
             "BEWARE! This is experimental and might generate wrong protonation states."
         )
         logger.debug("Using dimorphite-dl to enumerate protonation states.")
-        mol_at_ph_7 = _call_dimorphite_dl(mol, min_ph=7.0, max_ph=7.0, pka_precision=0)
-        all_mols = _call_dimorphite_dl(mol, min_ph=0.5, max_ph=13.5)
+        mol_at_ph_7 = call_dimorphite_dl([mol], min_ph=7.0, max_ph=7.0, pka_precision=0)
+        all_mols = call_dimorphite_dl([mol], min_ph=0.5, max_ph=13.5)
         # sort mols
         atom_charges = [
             np.sum([atom.GetTotalNumHs() for atom in mol.GetAtoms()])
@@ -293,11 +253,12 @@ def calculate_microstate_pka_values(
         logger.debug(mols)
 
     else:
-        logger.info("Using dimorphite-dl to identify protonation sites.")
-        mol_at_ph_7 = _call_dimorphite_dl(mol, min_ph=7.0, max_ph=7.0, pka_precision=0)
+        if verbose:
+            logger.info("Using dimorphite-dl to identify protonation sites.")
+        mol_at_ph_7 = call_dimorphite_dl([mol], min_ph=7.0, max_ph=7.0, pka_precision=0)
         assert len(mol_at_ph_7) == 1
         mol_at_ph_7 = mol_at_ph_7[0]
-        all_mols = _call_dimorphite_dl(mol, min_ph=0.5, max_ph=13.5)
+        all_mols = call_dimorphite_dl([mol], min_ph=0.5, max_ph=13.5)
 
         # identify protonation sites
         reaction_center_atom_idxs = sorted(
@@ -307,7 +268,8 @@ def calculate_microstate_pka_values(
 
         acids = []
         mol_at_state = deepcopy(mol_at_ph_7)
-        logger.info(f"Proposed mol at pH 7.4: {Chem.MolToSmiles(mol_at_state)}")
+        if verbose:
+            logger.info(f"Proposed mol at pH 7.4: {Chem.MolToSmiles(mol_at_state)}")
 
         used_reaction_center_atom_idxs = deepcopy(reaction_center_atom_idxs)
         logger.debug("Start with acids ...")
