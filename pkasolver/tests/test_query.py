@@ -1,5 +1,5 @@
 import numpy as np
-from pkasolver.query import _get_ionization_indices, calculate_microstate_pka_values
+from pkasolver.query import _get_reaction_centers, calculate_microstate_pka_values
 from rdkit import Chem
 import pytest, os
 
@@ -18,7 +18,7 @@ with open(input, "rb") as fh:
 def test_generate_query():
     from pkasolver.query import QueryModel
 
-    q = QueryModel()
+    _ = QueryModel()
 
 
 @pytest.mark.skipif(
@@ -86,7 +86,7 @@ def test_predict():
     deprot = Chem.MolFromSmiles("CC(=O)[O-]")
     prot = Chem.MolFromSmiles("CC(=O)O")
 
-    idx = _get_ionization_indices([deprot, prot], prot)[0]
+    idx = _get_reaction_centers([deprot, prot], prot)[0]
     m = mol_to_paired_mol_data(
         prot,
         deprot,
@@ -99,7 +99,7 @@ def test_predict():
     # https://www.masterorganicchemistry.com/2017/04/18/basicity-of-amines-and-pkah/
     deprot = Chem.MolFromSmiles("c1ccncc1")
     prot = Chem.MolFromSmiles("c1cc[nH+]cc1")
-    idx = _get_ionization_indices([deprot, prot], prot)[0]
+    idx = _get_reaction_centers([deprot, prot], prot)[0]
     m = mol_to_paired_mol_data(
         prot,
         deprot,
@@ -113,7 +113,7 @@ def test_predict():
     # https://www.masterorganicchemistry.com/2017/04/18/basicity-of-amines-and-pkah/
     deprot = Chem.MolFromSmiles("C1CCNCC1")
     prot = Chem.MolFromSmiles("C1CC[NH2+]CC1")
-    idx = _get_ionization_indices([deprot, prot], prot)[0]
+    idx = _get_reaction_centers([deprot, prot], prot)[0]
     m = mol_to_paired_mol_data(
         prot,
         deprot,

@@ -11,8 +11,9 @@ import numpy as np
 import svgutils.transform as sg
 import torch
 from rdkit import Chem, RDLogger
-from rdkit.Chem import Draw
+from rdkit.Chem import Draw, rdFMCS
 from torch_geometric.loader import DataLoader
+from IPython.display import SVG
 
 from pkasolver import run_with_mol_list as call_dimorphite_dl
 from pkasolver.chem import create_conjugate
@@ -27,7 +28,7 @@ from pkasolver.ml_architecture import GINPairV1
 
 
 @dataclass
-class States:
+class Protonation:
     pka: float
     pka_stddev: float
     protonated_mol: Chem.Mol
@@ -124,21 +125,20 @@ class QueryModel:
         return results
 
 
-def _get_ionization_indices(mol_list: list, compare_to: Chem.Mol) -> list:
+def _get_reaction_centers(
+    rdmols: list[Chem.Mol], reference_rdmol: Chem.Mol
+) -> list[int]:
     """Takes a list of mol objects of different protonation states,
     and returns the protonation center index
 
     """
-    from rdkit.Chem import rdFMCS
-
-    list_of_reaction_centers = []
-    for m2 in mol_list:
-        m1 = compare_to
-        assert m1.GetNumAtoms() == m2.GetNumAtoms()
+    reaction_centers = []
+    for rdmol in rdmols:
+        assert reference_rdmol.GetNumAtoms() == rdmol.GetNumAtoms()
 
         # find MCS
         mcs = rdFMCS.FindMCS(
-            [m1, m2],
+            [reference_rdmol, rdmol],
             bondCompare=rdFMCS.BondCompare.CompareOrder,
             timeout=120,
             atomCompare=rdFMCS.AtomCompare.CompareElements,
@@ -146,46 +146,146 @@ def _get_ionization_indices(mol_list: list, compare_to: Chem.Mol) -> list:
 
         # convert from SMARTS
         mcsp = Chem.MolFromSmarts(mcs.smartsString, False)
-        s1 = m1.GetSubstructMatch(mcsp)
-        s2 = m2.GetSubstructMatch(mcsp)
+        ref_rdmol_idxs = reference_rdmol.GetSubstructMatch(mcsp)
+        rdmol_idxs = rdmol.GetSubstructMatch(mcsp)
 
-        for i, j in zip(s1, s2):
+        for i, j in zip(ref_rdmol_idxs, rdmol_idxs):
             if i != j:  # matching not sucessfull
                 break
             if (
-                m1.GetAtomWithIdx(i).GetFormalCharge()
-                != m2.GetAtomWithIdx(j).GetFormalCharge()
+                reference_rdmol.GetAtomWithIdx(i).GetFormalCharge()
+                != rdmol.GetAtomWithIdx(j).GetFormalCharge()
             ):
-                list_of_reaction_centers.append(i)
+                reaction_centers.append(i)
 
-    logger.debug(set(list_of_reaction_centers))
-    return list_of_reaction_centers
+    logger.debug(set(reaction_centers))
+    return reaction_centers
 
 
-def _sort_conj(mols: list):
-    """sort mols based on number of hydrogen"""
+def _sort_conj(rdmols: list[Chem.Mol]) -> list[Chem.Mol]:
+    """Sort two molecules by the number of hydrogens,
+    so that the protonated molecule is first in the list."""
+    assert len(rdmols) == 2
 
-    assert len(mols) == 2
-    nr_of_hydrogen = [
-        np.sum([atom.GetTotalNumHs() for atom in mol.GetAtoms()]) for mol in mols
+    num_hydrogens = [
+        sum([atom.GetTotalNumHs() for atom in mol.GetAtoms()]) for mol in rdmols
     ]
-    if abs(nr_of_hydrogen[0] - nr_of_hydrogen[1]) != 1:
+
+    if num_hydrogens[0] - num_hydrogens[1] == 1:
+        return rdmols
+    elif num_hydrogens[0] - num_hydrogens[1] == -1:
+        return rdmols[::-1]
+    else:
         raise RuntimeError(
             "Neighboring protonation states are only allowed to have a difference of a"
             " single hydrogen."
         )
-    return [x for _, x in sorted(zip(nr_of_hydrogen, mols), reverse=True)]
 
 
-def _check_for_duplicates(states: list):
+def _deduplicate_protonations(protonations: list[Protonation]) -> list[Protonation]:
     """check whether two states have the same pKa value and remove one of them"""
-    all_r = {}
-    logger.debug(states)
-    for state in states:
-        m1, m2 = _sort_conj([state.protonated_mol, state.deprotonated_mol])
-        all_r[hash((Chem.MolToSmiles(m1), Chem.MolToSmiles(m2)))] = state
+    unique_protonations = {}
+    logger.debug(protonations)
+    for protonation in protonations:
+        m1, m2 = _sort_conj([protonation.protonated_mol, protonation.deprotonated_mol])
+        unique_protonations[hash((Chem.MolToSmiles(m1), Chem.MolToSmiles(m2)))] = (
+            protonation
+        )
     # logger.debug([all_r[k] for k in sorted(all_r, key=all_r.get)])
-    return sorted([all_r[k] for k in all_r], key=attrgetter("pka"))
+    return sorted(list(unique_protonations.values()), key=attrgetter("pka"))
+
+
+def _get_protonation(
+    protonated_rdmol: Chem.Mol,
+    deprotonated_rdmol: Chem.Mol,
+    reaction_center_idx: int,
+    query_model: QueryModel,
+    rdmol_at_ph_7: Chem.Mol,
+) -> Protonation:
+    m = mol_to_paired_mol_data(
+        protonated_rdmol,
+        deprotonated_rdmol,
+        reaction_center_idx,
+        selected_node_features,
+        selected_edge_features,
+    )
+    loader = dataset_to_dataloader([m], 1)
+    pka, pka_std = query_model.predict_pka_value(loader)
+
+    return Protonation(
+        pka,
+        pka_std,
+        protonated_rdmol,
+        deprotonated_rdmol,
+        reaction_center_idx,
+        ph7_mol=rdmol_at_ph_7,
+    )
+
+
+def _get_protonations_unidirection(
+    rdmol: Chem.Mol,
+    reaction_center_idxs: list[int],
+    target_ph: float,
+    query_model: QueryModel,
+    rdmol_at_ph_7: Chem.Mol,
+) -> list[Protonation]:
+    conjugate_states = []
+    rdmol_at_state = deepcopy(rdmol)
+    used_reaction_center_idxs = deepcopy(reaction_center_idxs)
+
+    logger.debug(f"Creating conjugates for target pH {target_ph} ...")
+
+    for _ in reaction_center_idxs:
+        states_per_iteration = []
+        for i in used_reaction_center_idxs:
+            try:
+                conj = create_conjugate(
+                    rdmol_at_state,
+                    i,
+                    pka=target_ph,
+                    known_pka_values=False,
+                )
+            except Exception:
+                continue
+
+            protonated_rdmol, deprotonated_rdmol = _sort_conj([conj, rdmol_at_state])
+
+            pka_state = _get_protonation(
+                protonated_rdmol,
+                deprotonated_rdmol,
+                i,
+                query_model,
+                rdmol_at_ph_7,
+            )
+
+            if pka_state.pka < 0.5 or pka_state.pka > 13.5:
+                logger.debug("pKa value out of bound!")
+                continue
+
+            # If the new state is not closer to the target pH, skip
+            if conjugate_states and not (
+                (target_ph < 7.0 and pka_state.pka < conjugate_states[-1].pka)
+                or (target_ph >= 7.0 and pka_state.pka > conjugate_states[-1].pka)
+            ):
+                continue
+
+            states_per_iteration.append(pka_state)
+
+        if not states_per_iteration:
+            break
+
+        # get the protonation state with the most neutral pka
+        if target_ph < 7.0:
+            neutral_pka_state = max(states_per_iteration, key=attrgetter("pka"))
+            rdmol_at_state = deepcopy(neutral_pka_state.protonated_mol)
+        else:
+            neutral_pka_state = min(states_per_iteration, key=attrgetter("pka"))
+            rdmol_at_state = deepcopy(neutral_pka_state.deprotonated_mol)
+        conjugate_states.append(neutral_pka_state)
+        # avoid double protonation
+        used_reaction_center_idxs.remove(conjugate_states[-1].reaction_center_idx)
+
+    return conjugate_states
 
 
 def calculate_microstate_pka_values(
@@ -194,256 +294,116 @@ def calculate_microstate_pka_values(
     query_model: Optional[QueryModel] = None,
     verbose: bool = False,
     device_str: str = "cuda",
-):
+) -> list[Protonation]:
     """Enumerate protonation states using a rdkit mol as input"""
 
     if query_model is None:
         query_model = QueryModel(device_str=device_str)
 
+    rdmols_at_ph_7 = call_dimorphite_dl([mol], min_ph=7.0, max_ph=7.0, pka_precision=0)
+    assert len(rdmols_at_ph_7) == 1
+    rdmol_at_ph_7 = rdmols_at_ph_7[0]
+
+    if verbose:
+        logger.info(f"Proposed mol at pH 7.4: {Chem.MolToSmiles(rdmol_at_ph_7)}")
+        logger.info("Using dimorphite-dl to identify protonation sites.")
+    all_mols = call_dimorphite_dl([mol], min_ph=0.5, max_ph=13.5)
+
     if only_dimorphite:
         logger.warning(
             "BEWARE! This is experimental and might generate wrong protonation states."
         )
-        logger.debug("Using dimorphite-dl to enumerate protonation states.")
-        mol_at_ph_7 = call_dimorphite_dl([mol], min_ph=7.0, max_ph=7.0, pka_precision=0)
-        all_mols = call_dimorphite_dl([mol], min_ph=0.5, max_ph=13.5)
         # sort mols
-        atom_charges = [
-            np.sum([atom.GetTotalNumHs() for atom in mol.GetAtoms()])
-            for mol in all_mols
-        ]
-
         # https://stackoverflow.com/questions/6618515/sorting-list-based-on-values-from-another-list
-        mols_sorted = [x for _, x in sorted(zip(atom_charges, all_mols), reverse=True)]
+        num_hydrogens = [
+            sum(atom.GetTotalNumHs() for atom in mol.GetAtoms()) for mol in all_mols
+        ]
+        mols_sorted = [x for _, x in sorted(zip(num_hydrogens, all_mols), reverse=True)]
 
-        reaction_center_atom_idxs = _get_ionization_indices(mols_sorted, mols_sorted[0])
+        reaction_center_idxs = _get_reaction_centers(mols_sorted, mols_sorted[0])
         # return only mol pairs
-        mols = []
-        for nr_of_states, idx in enumerate(reaction_center_atom_idxs):
-            logger.debug(Chem.MolToSmiles(mols_sorted[nr_of_states]))
-            logger.debug(Chem.MolToSmiles(mols_sorted[nr_of_states + 1]))
+        protonations = []
+        for nr_of_states, idx in enumerate(reaction_center_idxs):
+            protonated_rdmol = mols_sorted[nr_of_states]
+            deprotonated_rdmol = mols_sorted[nr_of_states + 1]
 
-            # generated paired data structure
-            m = mol_to_paired_mol_data(
-                mols_sorted[nr_of_states],
-                mols_sorted[nr_of_states + 1],
+            logger.debug(Chem.MolToSmiles(protonated_rdmol))
+            logger.debug(Chem.MolToSmiles(deprotonated_rdmol))
+
+            protonation = _get_protonation(
+                protonated_rdmol,
+                deprotonated_rdmol,
                 idx,
-                selected_node_features,
-                selected_edge_features,
-            )
-            loader = dataset_to_dataloader([m], 1)
-            pka, pka_std = query_model.predict_pka_value(loader)
-            pair = States(
-                pka,
-                pka_std,
-                mols_sorted[nr_of_states],
-                mols_sorted[nr_of_states + 1],
-                idx,
-                ph7_mol=mol_at_ph_7,
-            )
-            logger.debug(
-                pka,
-                Chem.MolToSmiles(mols_sorted[nr_of_states]),
-                Chem.MolToSmiles(mols_sorted[nr_of_states + 1]),
+                query_model,
+                rdmol_at_ph_7,
             )
 
-            mols.append(pair)
-        logger.debug(mols)
-
+            protonations.append(protonation)
+        logger.debug(protonations)
     else:
-        if verbose:
-            logger.info("Using dimorphite-dl to identify protonation sites.")
-        mol_at_ph_7 = call_dimorphite_dl([mol], min_ph=7.0, max_ph=7.0, pka_precision=0)
-        assert len(mol_at_ph_7) == 1
-        mol_at_ph_7 = mol_at_ph_7[0]
-        all_mols = call_dimorphite_dl([mol], min_ph=0.5, max_ph=13.5)
-
-        # identify protonation sites
-        reaction_center_atom_idxs = sorted(
-            list(set(_get_ionization_indices(all_mols, mol_at_ph_7)))
+        reaction_center_idxs = sorted(
+            list(set(_get_reaction_centers(all_mols, rdmol_at_ph_7)))
         )
-        mols = [mol_at_ph_7]
 
-        acids = []
-        mol_at_state = deepcopy(mol_at_ph_7)
-        if verbose:
-            logger.info(f"Proposed mol at pH 7.4: {Chem.MolToSmiles(mol_at_state)}")
+        acidic_protonations = _get_protonations_unidirection(
+            rdmol_at_ph_7,
+            reaction_center_idxs,
+            target_ph=0.0,
+            query_model=query_model,
+            rdmol_at_ph_7=rdmol_at_ph_7,
+        )
+        logger.debug(acidic_protonations)
 
-        used_reaction_center_atom_idxs = deepcopy(reaction_center_atom_idxs)
-        logger.debug("Start with acids ...")
-        # for each possible protonation state
-        for _ in reaction_center_atom_idxs:
-            states_per_iteration = []
-            # for each possible reaction center
-            for i in used_reaction_center_atom_idxs:
-                try:
-                    conj = create_conjugate(
-                        mol_at_state,
-                        i,
-                        pka=0.0,
-                        known_pka_values=False,
-                    )
-                except Exception:
-                    continue
+        basic_protonations = _get_protonations_unidirection(
+            rdmol_at_ph_7,
+            reaction_center_idxs,
+            target_ph=14.0,
+            query_model=query_model,
+            rdmol_at_ph_7=rdmol_at_ph_7,
+        )
+        logger.debug(basic_protonations)
 
-                logger.debug(f"{Chem.MolToSmiles(conj)}")
+        protonations = _deduplicate_protonations(
+            basic_protonations + acidic_protonations[::-1]
+        )
 
-                # sort mols (protonated/deprotonated)
-                sorted_mols = _sort_conj([conj, mol_at_state])
-
-                m = mol_to_paired_mol_data(
-                    sorted_mols[0],
-                    sorted_mols[1],
-                    i,
-                    selected_node_features,
-                    selected_edge_features,
-                )
-                # calc pka value
-                loader = dataset_to_dataloader([m], 1)
-                pka, pka_std = query_model.predict_pka_value(loader)
-                pair = States(
-                    pka,
-                    pka_std,
-                    sorted_mols[0],
-                    sorted_mols[1],
-                    reaction_center_idx=i,
-                    ph7_mol=mol_at_ph_7,
-                )
-
-                # test if pka is inside pH range
-                if pka < 0.5:
-                    logger.debug("Too low pKa value!")
-                    # skip rest
-                    continue
-
-                logger.debug(
-                    "acid: ",
-                    pka,
-                    Chem.MolToSmiles(conj),
-                    i,
-                    Chem.MolToSmiles(mol_at_state),
-                )
-
-                # if this is NOT the first state found
-                if acids and pka < acids[-1].pka or not acids:
-                    states_per_iteration.append(pair)
-            if not states_per_iteration:
-                # no protonation state left
-                break
-
-            # get the protonation state with the highest pka
-            acids.append(max(states_per_iteration, key=attrgetter("pka")))
-            # avoid double protonation
-            used_reaction_center_atom_idxs.remove(acids[-1].reaction_center_idx)
-            mol_at_state = deepcopy(acids[-1].protonated_mol)
-
-        logger.debug(acids)
-
-        #######################################################
-        # continue with bases
-        #######################################################
-
-        bases = []
-        mol_at_state = deepcopy(mol_at_ph_7)
-        logger.debug("Start with bases ...")
-        used_reaction_center_atom_idxs = deepcopy(reaction_center_atom_idxs)
-        logger.debug(reaction_center_atom_idxs)
-        # for each possible protonation state
-        for _ in reaction_center_atom_idxs:
-            states_per_iteration = []
-            # for each possible reaction center
-            for i in used_reaction_center_atom_idxs:
-                try:
-                    conj = create_conjugate(
-                        mol_at_state, i, pka=13.5, known_pka_values=False
-                    )
-                except Exception:
-                    continue
-                sorted_mols = _sort_conj([conj, mol_at_state])
-                m = mol_to_paired_mol_data(
-                    sorted_mols[0],
-                    sorted_mols[1],
-                    i,
-                    selected_node_features,
-                    selected_edge_features,
-                )
-                # calc pka values
-                loader = dataset_to_dataloader([m], 1)
-                pka, pka_std = query_model.predict_pka_value(loader)
-                pair = States(
-                    pka,
-                    pka_std,
-                    sorted_mols[0],
-                    sorted_mols[1],
-                    reaction_center_idx=i,
-                    ph7_mol=mol_at_ph_7,
-                )
-
-                # check if pka is within pH range
-                if pka > 13.5:
-                    logger.debug("Too high pKa value!")
-                    continue
-
-                logger.debug(
-                    "base",
-                    pka,
-                    Chem.MolToSmiles(conj),
-                    i,
-                    Chem.MolToSmiles(mol_at_state),
-                )
-                # if bases already present
-                if bases and pka > bases[-1].pka or not bases:
-                    states_per_iteration.append(pair)
-            # no protonation state left
-            if not states_per_iteration:
-                break
-            # take state with lowest pka value
-            bases.append(min(states_per_iteration, key=attrgetter("pka")))
-            mol_at_state = deepcopy(bases[-1].deprotonated_mol)
-            # avoid double deprotonation
-            used_reaction_center_atom_idxs.remove(bases[-1].reaction_center_idx)
-
-        logger.debug(bases)
-        acids.reverse()
-        mols = bases + acids
-        # remove possible duplications
-        mols = _check_for_duplicates(mols)
-
-    if len(mols) == 0:
+    if not protonations:
         logger.error("Could not identify any ionizable group. Aborting.")
 
-    return mols
+    return protonations
 
 
-def draw_pka_map(protonation_states: list, size=(450, 450)):
-    """draw mol at pH=7.0 and indicate protonation sites with respectiv pKa values"""
-    mol_at_ph_7 = deepcopy(protonation_states[0].ph7_mol)
-    for state in protonation_states:
-        atom = mol_at_ph_7.GetAtomWithIdx(state.reaction_center_idx)
+def draw_pka_map(protonations: list[Protonation], size: tuple[int, int] = (450, 450)):
+    """draw mol at pH=7.0 and indicate protonation sites with respective pKa values"""
+    rdmol_at_ph_7 = deepcopy(protonations[0].ph7_mol)
+    for protonation in protonations:
+        reaction_center_atom = rdmol_at_ph_7.GetAtomWithIdx(
+            protonation.reaction_center_idx
+        )
         try:
-            atom.SetProp("atomNote", f'{atom.GetProp("atomNote")},   {state.pka:.2f}')
+            reaction_center_atom.SetProp(
+                "atomNote",
+                f'{reaction_center_atom.GetProp("atomNote")},   {protonation.pka:.2f}',
+            )
         except Exception:
-            atom.SetProp("atomNote", f"{state.pka:.2f}")
-    return Draw.MolToImage(mol_at_ph_7, size=size)
+            reaction_center_atom.SetProp("atomNote", f"{protonation.pka:.2f}")
+    return Draw.MolToImage(rdmol_at_ph_7, size=size)
 
 
-def draw_pka_reactions(
-    protonation_states: list, height=250, write_png_to_file: str = ""
-):
+def draw_pka_reactions(protonations: list, height=250, write_png_to_file: str = ""):
     """
     Draws protonation states.
     file can be saved as png using `write_png_to_file` parameter.
     """
-    from IPython.display import SVG
-
     draw_pairs, pair_atoms, legend = [], [], []
-    for i in range(len(protonation_states)):
-        state = protonation_states[i]
-
-        draw_pairs.extend([state.protonated_mol, state.deprotonated_mol])
-        pair_atoms.extend([[state.reaction_center_idx], [state.reaction_center_idx]])
-        f = f"pka_{i} = {state.pka:.2f} (stddev: {state.pka_stddev:.2f})"
-        legend.append(f)
+    for i, protonation in enumerate(protonations):
+        draw_pairs.extend([protonation.protonated_mol, protonation.deprotonated_mol])
+        pair_atoms.extend(
+            [[protonation.reaction_center_idx], [protonation.reaction_center_idx]]
+        )
+        legend.append(
+            f"pka_{i} = {protonation.pka:.2f} (stddev: {protonation.pka_stddev:.2f})"
+        )
 
     s = Draw.MolsToGridImage(
         draw_pairs,
@@ -456,6 +416,7 @@ def draw_pka_reactions(
     if hasattr(s, "data"):
         s = s.data.replace("svg:", "")
     fig = sg.fromstring(s)
+
     for i, text in enumerate(legend):
         label = sg.TextElement(
             height * 2,
@@ -466,36 +427,22 @@ def draw_pka_reactions(
             anchor="middle",
         )
         fig.append(label)
+
         h = height * (i + 0.5)
         w = height * 2
-        fig.append(
-            sg.LineElement(
-                [(w * 0.9, h - height * 0.02), (w * 1.1, h - height * 0.02)],
-                width=2,
-                color="black",
+        for fx_1, fx_2, fy_1, fy_2 in (
+            (0.9, 1.1, -0.02, -0.02),
+            (1.1, 1.07, -0.02, -0.04),
+            (0.9, 1.1, 0.02, 0.02),
+            (0.9, 0.93, 0.02, 0.04),
+        ):
+            fig.append(
+                sg.LineElement(
+                    [(w * fx_1, h + height * fy_1), (w * fx_2, h + height * fy_2)],
+                    width=2,
+                    color="black",
+                )
             )
-        )
-        fig.append(
-            sg.LineElement(
-                [(w * 1.1, h - height * 0.02), (w * 1.07, h - height * 0.04)],
-                width=2,
-                color="black",
-            )
-        )
-        fig.append(
-            sg.LineElement(
-                [(w * 0.9, h + height * 0.02), (w * 1.1, h + height * 0.02)],
-                width=2,
-                color="black",
-            )
-        )
-        fig.append(
-            sg.LineElement(
-                [(w * 0.9, h + height * 0.02), (w * 0.93, h + height * 0.04)],
-                width=2,
-                color="black",
-            )
-        )
     # if png file path is passed write png file
     if write_png_to_file:
         cairosvg.svg2png(
