@@ -1,11 +1,19 @@
+import copy
+from typing import Optional, List, Callable
+
 import torch
 import torch.nn.functional as F
-from torch.nn import Linear, ModuleList, ReLU, Sequential
-from torch_geometric.nn import (GCNConv, GlobalAttention, NNConv,
-                                global_mean_pool)
+from torch import Tensor
+from torch.nn import BatchNorm1d, Linear, ModuleList, ReLU, Sequential
+from torch_geometric.nn import GCNConv, GlobalAttention, NNConv, global_mean_pool
+from torch_geometric.nn.conv import GINConv
+from torch_geometric.nn.models import GAT, AttentiveFP
+from torch_geometric.nn.models.jumping_knowledge import JumpingKnowledge
+from torch_geometric.typing import Adj
 from tqdm import tqdm
 
-from pkasolver.constants import DEVICE, SEED
+from pkasolver.constants import SEED
+from pkasolver.ml import get_device
 
 #####################################
 #####################################
@@ -53,7 +61,160 @@ def forward_lins(x, l: list):
 # defining GCN for single state
 #####################################
 #####################################
-from torch_geometric.nn.models import GAT, GIN, AttentiveFP
+
+
+class BasicGNN(torch.nn.Module):
+    r"""An abstract class for implementing basic GNN models.
+
+    Args:
+        in_channels (int): Size of each input sample.
+        hidden_channels (int): Size of each hidden sample.
+        num_layers (int): Number of message passing layers.
+        out_channels (int, optional): If not set to :obj:`None`, will apply a
+            final linear transformation to convert hidden node embeddings to
+            output size :obj:`out_channels`. (default: :obj:`None`)
+        dropout (float, optional): Dropout probability. (default: :obj:`0.`)
+        act (Callable, optional): The non-linear activation function to use.
+            (default: :meth:`torch.nn.ReLU(inplace=True)`)
+        norm (torch.nn.Module, optional): The normalization operator to use.
+            (default: :obj:`None`)
+        jk (str, optional): The Jumping Knowledge mode
+            (:obj:`"last"`, :obj:`"cat"`, :obj:`"max"`, :obj:`"last"`).
+            (default: :obj:`"last"`)
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_channels: int,
+        num_layers: int,
+        out_channels: Optional[int] = None,
+        dropout: float = 0.0,
+        act: Optional[Callable] = ReLU(inplace=True),
+        norm: Optional[torch.nn.Module] = None,
+        jk: str = "last",
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.hidden_channels = hidden_channels
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.act = act
+
+        self.convs = ModuleList()
+
+        self.norms = None
+        if norm is not None:
+            self.norms = ModuleList([copy.deepcopy(norm) for _ in range(num_layers)])
+
+        if jk != "last":
+            self.jk = JumpingKnowledge(jk, hidden_channels, num_layers)
+
+        if out_channels is not None:
+            self.out_channels = out_channels
+            if jk == "cat":
+                self.lin = Linear(num_layers * hidden_channels, out_channels)
+            else:
+                self.lin = Linear(hidden_channels, out_channels)
+        elif jk == "cat":
+            self.out_channels = num_layers * hidden_channels
+        else:
+            self.out_channels = hidden_channels
+
+    def reset_parameters(self):
+        for conv in self.convs:
+            conv.reset_parameters()
+        for norm in self.norms or []:
+            norm.reset_parameters()
+        if hasattr(self, "jk"):
+            self.jk.reset_parameters()
+        if hasattr(self, "lin"):
+            self.lin.reset_parameters()
+
+    def forward(self, x: Tensor, edge_index: Adj, *args, **kwargs) -> Tensor:
+        xs: List[Tensor] = []
+        for i in range(self.num_layers):
+            x = self.convs[i](x, edge_index, *args, **kwargs)
+            if self.norms is not None:
+                x = self.norms[i](x)
+            if self.act is not None:
+                x = self.act(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            if hasattr(self, "jk"):
+                xs.append(x)
+
+        x = self.jk(xs) if hasattr(self, "jk") else x
+        x = self.lin(x) if hasattr(self, "lin") else x
+        return x
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}({self.in_channels}, "
+            f"{self.out_channels}, num_layers={self.num_layers})"
+        )
+
+
+class GIN(BasicGNN):
+    r"""The Graph Neural Network from the `"How Powerful are Graph Neural
+    Networks?" <https://arxiv.org/abs/1810.00826>`_ paper, using the
+    :class:`~torch_geometric.nn.GINConv` operator for message passing.
+
+    Args:
+        in_channels (int): Size of each input sample.
+        hidden_channels (int): Size of each hidden sample.
+        num_layers (int): Number of message passing layers.
+        out_channels (int, optional): If not set to :obj:`None`, will apply a
+            final linear transformation to convert hidden node embeddings to
+            output size :obj:`out_channels`. (default: :obj:`None`)
+        dropout (float, optional): Dropout probability. (default: :obj:`0.`)
+        act (Callable, optional): The non-linear activation function to use.
+            (default: :meth:`torch.nn.ReLU(inplace=True)`)
+        norm (torch.nn.Module, optional): The normalization operator to use.
+            (default: :obj:`None`)
+        jk (str, optional): The Jumping Knowledge mode
+            (:obj:`"last"`, :obj:`"cat"`, :obj:`"max"`, :obj:`"last"`).
+            (default: :obj:`"last"`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.GINConv`.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_channels: int,
+        num_layers: int,
+        out_channels: Optional[int] = None,
+        dropout: float = 0.0,
+        act: Optional[Callable] = ReLU(inplace=True),
+        norm: Optional[torch.nn.Module] = None,
+        jk: str = "last",
+        **kwargs,
+    ):
+        super().__init__(
+            in_channels,
+            hidden_channels,
+            num_layers,
+            out_channels,
+            dropout,
+            act,
+            norm,
+            jk,
+        )
+
+        self.convs.append(GINConv(GIN.MLP(in_channels, hidden_channels), **kwargs))
+        for _ in range(1, num_layers):
+            self.convs.append(
+                GINConv(GIN.MLP(hidden_channels, hidden_channels), **kwargs)
+            )
+
+    @staticmethod
+    def MLP(in_channels: int, out_channels: int) -> torch.nn.Module:
+        return Sequential(
+            Linear(in_channels, out_channels),
+            BatchNorm1d(out_channels),
+            ReLU(inplace=True),
+            Linear(out_channels, out_channels),
+        )
 
 
 class AttentivePka(AttentiveFP):
@@ -67,7 +228,6 @@ class AttentivePka(AttentiveFP):
         edge_dim: int,
         num_timesteps: int,
     ):
-
         super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -88,12 +248,14 @@ class AttentivePka(AttentiveFP):
 
     @staticmethod
     def _return_lin(
-        input_dim: int, nr_of_lin_layers: int, embeding_size: int,
+        input_dim: int,
+        nr_of_lin_layers: int,
+        embeding_size: int,
     ):
-        lins = []
-        lins.append(Linear(input_dim, embeding_size))
-        for _ in range(2, nr_of_lin_layers):
-            lins.append(Linear(embeding_size, embeding_size))
+        lins = [Linear(input_dim, embeding_size)]
+        lins.extend(
+            Linear(embeding_size, embeding_size) for _ in range(2, nr_of_lin_layers)
+        )
         lins.append(Linear(embeding_size, 1))
         return ModuleList(lins)
 
@@ -125,12 +287,14 @@ class GATpKa(GAT):
 
     @staticmethod
     def _return_lin(
-        input_dim: int, nr_of_lin_layers: int, embeding_size: int,
+        input_dim: int,
+        nr_of_lin_layers: int,
+        embeding_size: int,
     ):
-        lins = []
-        lins.append(Linear(input_dim, embeding_size))
-        for _ in range(2, nr_of_lin_layers):
-            lins.append(Linear(embeding_size, embeding_size))
+        lins = [Linear(input_dim, embeding_size)]
+        lins.extend(
+            Linear(embeding_size, embeding_size) for _ in range(2, nr_of_lin_layers)
+        )
         lins.append(Linear(embeding_size, 1))
         return ModuleList(lins)
 
@@ -163,12 +327,14 @@ class GINpKa(GIN):
 
     @staticmethod
     def _return_lin(
-        input_dim: int, nr_of_lin_layers: int, embeding_size: int,
+        input_dim: int,
+        nr_of_lin_layers: int,
+        embeding_size: int,
     ):
-        lins = []
-        lins.append(Linear(input_dim, embeding_size))
-        for _ in range(2, nr_of_lin_layers):
-            lins.append(Linear(embeding_size, embeding_size))
+        lins = [Linear(input_dim, embeding_size)]
+        lins.extend(
+            Linear(embeding_size, embeding_size) for _ in range(2, nr_of_lin_layers)
+        )
         lins.append(Linear(embeding_size, embeding_size))
         return ModuleList(lins)
 
@@ -187,29 +353,29 @@ class GCN(torch.nn.Module):
 
     @staticmethod
     def _return_lin(
-        input_dim: int, nr_of_lin_layers: int, embeding_size: int,
+        input_dim: int,
+        nr_of_lin_layers: int,
+        embeding_size: int,
     ):
-        lins = []
-        lins.append(Linear(input_dim, embeding_size))
-        for _ in range(2, nr_of_lin_layers):
-            lins.append(Linear(embeding_size, embeding_size))
+        lins = [Linear(input_dim, embeding_size)]
+        lins.extend(
+            Linear(embeding_size, embeding_size) for _ in range(2, nr_of_lin_layers)
+        )
         lins.append(Linear(embeding_size, 1))
         return ModuleList(lins)
 
     @staticmethod
     def _return_conv(num_node_features, nr_of_layers, embeding_size):
-        convs = []
-        convs.append(GCNConv(num_node_features, embeding_size))
-        for _ in range(1, nr_of_layers):
-            convs.append(GCNConv(embeding_size, embeding_size))
+        convs = [GCNConv(num_node_features, embeding_size)]
+        convs.extend(
+            GCNConv(embeding_size, embeding_size) for _ in range(1, nr_of_layers)
+        )
         return ModuleList(convs)
 
     @staticmethod
     def _return_nnconv(
         num_node_features, num_edge_features, nr_of_layers, embeding_size
     ):
-
-        convs = []
         nn1 = Sequential(
             Linear(num_edge_features, embeding_size),
             ReLU(),
@@ -220,9 +386,10 @@ class GCN(torch.nn.Module):
             ReLU(),
             Linear(embeding_size, embeding_size * embeding_size),
         )
-        convs.append(NNConv(num_node_features, embeding_size, nn=nn1))
-        for _ in range(1, nr_of_layers):
-            convs.append(NNConv(embeding_size, embeding_size, nn=nn2))
+        convs = [NNConv(num_node_features, embeding_size, nn=nn1)]
+        convs.extend(
+            NNConv(embeding_size, embeding_size, nn=nn2) for _ in range(1, nr_of_layers)
+        )
         return ModuleList(convs)
 
 
@@ -233,7 +400,7 @@ class GCN(torch.nn.Module):
 class GCNSingleForward:
     def _forward(self, x, edge_index, x_batch):
         # move batch to device
-        x_batch = x_batch.to(device=DEVICE)
+        x_batch = x_batch.to(device=self.device)
 
         if self.attention:
             # if attention=True, pool
@@ -245,7 +412,8 @@ class GCNSingleForward:
         x = F.dropout(x, p=0.5, training=self.training)
 
         # global max pooling
-        x = global_mean_pool(x, x_batch)  # [batch_size, hidden_channels]
+        # [batch_size, hidden_channels]
+        x = global_mean_pool(x, x_batch)
 
         # if attention=True append attention layer
         if self.attention:
@@ -258,14 +426,15 @@ class GCNSingleForward:
 
 class GCNPairOneConvForward:
     def _forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
-        x_d_batch = data.x_d_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
+        x_d_batch = data.x_d_batch.to(device=self.device)
 
         # using only a single conv
         x_p = forward_convs(x_p, data.edge_index_p, self.convs)
         x_d = forward_convs(x_d, data.edge_index_d, self.convs)
 
-        x_p = global_mean_pool(x_p, x_p_batch)  # [batch_size, hidden_channels]
+        # [batch_size, hidden_channels]
+        x_p = global_mean_pool(x_p, x_p_batch)
         x_d = global_mean_pool(x_d, x_d_batch)
 
         x_p = F.dropout(x_p, p=0.5, training=self.training)
@@ -279,8 +448,8 @@ class GCNPairOneConvForward:
 
 class GCNPairTwoConvForward:
     def _forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
-        x_d_batch = data.x_d_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
+        x_d_batch = data.x_d_batch.to(device=self.device)
 
         if self.attention:
             x_p_att = self.pool(x_p, x_p_batch)
@@ -289,7 +458,8 @@ class GCNPairTwoConvForward:
         x_p = forward_convs(x_p, data.edge_index_p, self.convs_p)
         x_d = forward_convs(x_d, data.edge_index_d, self.convs_d)
 
-        x_p = global_mean_pool(x_p, x_p_batch)  # [batch_size, hidden_channels]
+        # [batch_size, hidden_channels]
+        x_p = global_mean_pool(x_p, x_p_batch)
         x_d = global_mean_pool(x_d, x_d_batch)
 
         if self.attention:
@@ -304,14 +474,14 @@ class GCNPairTwoConvForward:
 
 class NNConvSingleForward:
     def _forward(self, x, x_batch, edge_attr, edge_index):
-
-        x_batch = x_batch.to(device=DEVICE)
+        x_batch = x_batch.to(device=self.device)
         if self.attention:
             x_att = self.pool(x, x_batch)
 
         x = forward_convs_with_edge_attr(x, edge_index, edge_attr, self.convs)
 
-        x = global_mean_pool(x, x_batch)  # [batch_size, hidden_channels]
+        # [batch_size, hidden_channels]
+        x = global_mean_pool(x, x_batch)
 
         if self.attention:
             x = torch.cat((x, x_att), 1)
@@ -324,10 +494,9 @@ class NNConvSingleForward:
 
 class NNConvPairForward:
     def _forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
-
         x_p_batch, x_d_batch = (
-            data.x_p_batch.to(device=DEVICE),
-            data.x_d_batch.to(device=DEVICE),
+            data.x_p_batch.to(device=self.device),
+            data.x_d_batch.to(device=self.device),
         )
         x_p_att = self.pool(x_p, x_p_batch)
         x_d_att = self.pool(x_d, x_d_batch)
@@ -339,7 +508,8 @@ class NNConvPairForward:
             x_d, data.edge_index_d, edge_attr_d, self.convs_d
         )
 
-        x_p = global_mean_pool(x_p, x_p_batch)  # [batch_size, hidden_channels]
+        # [batch_size, hidden_channels]
+        x_p = global_mean_pool(x_p, x_p_batch)
         x_d = global_mean_pool(x_d, x_d_batch)
 
         if self.attention:
@@ -376,7 +546,9 @@ class NNConvSingleArchitecture(GCN):
             input_dim = hidden_channels
 
         self.lins = GCN._return_lin(
-            input_dim=input_dim, nr_of_lin_layers=2, embeding_size=hidden_channels,
+            input_dim=input_dim,
+            nr_of_lin_layers=2,
+            embeding_size=hidden_channels,
         )
 
 
@@ -395,7 +567,9 @@ class GCNSingleArchitecture(GCN):
             input_dim = hidden_channels
 
         self.lins = GCN._return_lin(
-            input_dim=input_dim, nr_of_lin_layers=2, embeding_size=hidden_channels,
+            input_dim=input_dim,
+            nr_of_lin_layers=2,
+            embeding_size=hidden_channels,
         )
 
 
@@ -403,7 +577,9 @@ class GCNPairArchitecture(GCN):
     def __init__(self, num_node_features, nr_of_layers: int, hidden_channels: int):
         super().__init__()
 
-        self.pool = attention_pooling(num_node_features,)
+        self.pool = attention_pooling(
+            num_node_features,
+        )
 
         self.convs_p = self._return_conv(
             num_node_features, nr_of_layers=nr_of_layers, embeding_size=hidden_channels
@@ -417,7 +593,9 @@ class GCNPairArchitecture(GCN):
             input_dim = hidden_channels * 2
 
         self.lins = GCN._return_lin(
-            input_dim=input_dim, nr_of_lin_layers=2, embeding_size=hidden_channels,
+            input_dim=input_dim,
+            nr_of_lin_layers=2,
+            embeding_size=hidden_channels,
         )
 
         self.pool = attention_pooling(num_node_features)
@@ -433,16 +611,16 @@ class GCNPairArchitectureV2(GCN):
             num_node_features, nr_of_layers=nr_of_layers, embeding_size=hidden_channels
         )
 
-        if self.attention:
-            input_dim = hidden_channels
-        else:
-            input_dim = hidden_channels
-
+        input_dim = hidden_channels
         self.lins_d = GCN._return_lin(
-            input_dim=input_dim, nr_of_lin_layers=2, embeding_size=hidden_channels,
+            input_dim=input_dim,
+            nr_of_lin_layers=2,
+            embeding_size=hidden_channels,
         )
         self.lins_p = GCN._return_lin(
-            input_dim=input_dim, nr_of_lin_layers=2, embeding_size=hidden_channels,
+            input_dim=input_dim,
+            nr_of_lin_layers=2,
+            embeding_size=hidden_channels,
         )
 
         self.pool = attention_pooling(num_node_features)
@@ -478,7 +656,9 @@ class NNConvPairArchitecture(GCN):
             input_dim = 2 * hidden_channels
 
         self.lins = GCN._return_lin(
-            input_dim=input_dim, nr_of_lin_layers=2, embeding_size=hidden_channels,
+            input_dim=input_dim,
+            nr_of_lin_layers=2,
+            embeding_size=hidden_channels,
         )
 
 
@@ -497,6 +677,7 @@ class GATProt(GATpKa):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
         super().__init__(
             in_channels=num_node_features,
@@ -505,16 +686,18 @@ class GATProt(GATpKa):
             num_layers=num_layers,
             dropout=dropout,
         )
+        self.device = get_device(device_str)
         self.lins = GATpKa._return_lin(
             input_dim=out_channels, nr_of_lin_layers=2, embeding_size=hidden_channels
         )
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
 
         x = super().forward(x=x_p, edge_index=data.edge_index_p)
         # global mean pooling
-        x = global_mean_pool(x, x_p_batch)  # [batch_size, hidden_channels]
+        # [batch_size, hidden_channels]
+        x = global_mean_pool(x, x_p_batch)
         # run through linear layer
         x = forward_lins(x, self.lins)
         return x
@@ -531,6 +714,7 @@ class AttentiveProt(AttentivePka):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
         super().__init__(
             in_channels=num_node_features,
@@ -541,18 +725,20 @@ class AttentiveProt(AttentivePka):
             edge_dim=num_edge_features,
             num_timesteps=num_timesteps,
         )
+        self.device = get_device(device_str)
         self.lins = AttentivePka._return_lin(
             input_dim=out_channels, nr_of_lin_layers=2, embeding_size=hidden_channels
         )
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
 
         x = super().forward(
             x=x_p, edge_attr=edge_attr_p, edge_index=data.edge_index_p, batch=x_p_batch
         )
         # global mean pooling
-        # x = global_mean_pool(x, x_p_batch)  # [batch_size, hidden_channels]
+        # [batch_size, hidden_channels]
+        # x = global_mean_pool(x, x_p_batch)
         # run through linear layer
         x = forward_lins(x, self.lins)
         return x
@@ -568,6 +754,7 @@ class GINProt(GINpKa):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
         super().__init__(
             in_channels=num_node_features,
@@ -576,17 +763,19 @@ class GINProt(GINpKa):
             num_layers=num_layers,
             dropout=dropout,
         )
+        self.device = get_device(device_str)
         self.lins = GINpKa._return_lin(
             input_dim=out_channels, nr_of_lin_layers=3, embeding_size=hidden_channels
         )
-        self.final_lin = Linear(hidden_channels, 1, device=DEVICE)
+        self.final_lin = Linear(hidden_channels, 1, device=self.device)
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
 
         x = super().forward(x=x_p, edge_index=data.edge_index_p)
         # global mean pooling
-        x = global_mean_pool(x, x_p_batch)  # [batch_size, hidden_channels]
+        # [batch_size, hidden_channels]
+        x = global_mean_pool(x, x_p_batch)
         # run through linear layer
         x = forward_lins(x, self.lins)
 
@@ -603,6 +792,7 @@ class GATPair(GATpKa):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
         super().__init__(
             in_channels=num_node_features,
@@ -611,6 +801,7 @@ class GATPair(GATpKa):
             num_layers=num_layers,
             dropout=dropout,
         )
+        self.device = get_device(device_str)
         self.lins = GATpKa._return_lin(
             input_dim=out_channels, nr_of_lin_layers=2, embeding_size=hidden_channels
         )
@@ -619,13 +810,14 @@ class GATPair(GATpKa):
         def _forward(x, edge_index, x_batch, func):
             x = func(x=x, edge_index=edge_index)
             # global mean pooling
-            x = global_mean_pool(x, x_batch)  # [batch_size, hidden_channels]
+            # [batch_size, hidden_channels]
+            x = global_mean_pool(x, x_batch)
             # run through linear layer
             return forward_lins(x, self.lins)
 
         func = super().forward
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
-        x_d_batch = data.x_d_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
+        x_d_batch = data.x_d_batch.to(device=self.device)
 
         x_p = _forward(x_p, data.edge_index_p, x_p_batch, func)
         x_d = _forward(x_d, data.edge_index_d, x_d_batch, func)
@@ -642,8 +834,11 @@ class GINPairV1(GCN):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
         super().__init__()
+
+        self.device = get_device(device_str)
 
         GIN_p = GINpKa(
             in_channels=num_node_features,
@@ -667,18 +862,19 @@ class GINPairV1(GCN):
         )
         self.GIN_p = GIN_p
         self.GIN_d = GIN_d
-        self.final_lin = Linear(hidden_channels, 1, device=DEVICE)
+        self.final_lin = Linear(hidden_channels, 1, device=self.device)
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
         def _forward(x, edge_index, x_batch, func):
             x = func(x=x, edge_index=edge_index)
             # global mean pooling
-            x = global_mean_pool(x, x_batch)  # [batch_size, hidden_channels]
+            # [batch_size, hidden_channels]
+            x = global_mean_pool(x, x_batch)
             # run through linear layer
             return x
 
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
-        x_d_batch = data.x_d_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
+        x_d_batch = data.x_d_batch.to(device=self.device)
 
         x_p = _forward(x_p, data.edge_index_p, x_p_batch, self.GIN_p.forward)
         x_d = _forward(x_d, data.edge_index_d, x_d_batch, self.GIN_d.forward)
@@ -698,8 +894,11 @@ class GINPairV3(GCN):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
         super().__init__()
+
+        self.device = get_device(device_str)
 
         GIN_p = GINpKa(
             in_channels=num_node_features,
@@ -717,11 +916,13 @@ class GINPairV3(GCN):
         )
 
         self.lins = GINpKa._return_lin(
-            input_dim=out_channels, nr_of_lin_layers=3, embeding_size=hidden_channels,
+            input_dim=out_channels,
+            nr_of_lin_layers=3,
+            embeding_size=hidden_channels,
         )
         self.GIN_p = GIN_p
         self.GIN_d = GIN_d
-        self.final_lin = Linear(hidden_channels * 2, 1, device=DEVICE)
+        self.final_lin = Linear(hidden_channels * 2, 1, device=self.device)
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
         def _forward(x, edge_index, x_batch, func):
@@ -731,8 +932,8 @@ class GINPairV3(GCN):
             # run through linear layer
             return forward_lins(x, self.lins)
 
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
-        x_d_batch = data.x_d_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
+        x_d_batch = data.x_d_batch.to(device=self.device)
 
         x_p = _forward(x_p, data.edge_index_p, x_p_batch, self.GIN_p.forward)
         x_d = _forward(x_d, data.edge_index_d, x_d_batch, self.GIN_d.forward)
@@ -751,8 +952,8 @@ class GINPairV2(GINpKa):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
-
         super().__init__(
             in_channels=num_node_features,
             out_channels=out_channels,
@@ -761,13 +962,15 @@ class GINPairV2(GINpKa):
             dropout=dropout,
         )
 
+        self.device = get_device(device_str)
+
         self.lins_d = GINpKa._return_lin(
             input_dim=out_channels, nr_of_lin_layers=3, embeding_size=hidden_channels
         )
         self.lins_p = GINpKa._return_lin(
             input_dim=out_channels, nr_of_lin_layers=3, embeding_size=hidden_channels
         )
-        self.final_lin = Linear(2, 1, device=DEVICE)
+        self.final_lin = Linear(2, 1, device=self.device)
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
         def _forward(x, edge_index, x_batch, func, lins):
@@ -777,8 +980,8 @@ class GINPairV2(GINpKa):
             # run through linear layer
             return forward_lins(x, lins)
 
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
-        x_d_batch = data.x_d_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
+        x_d_batch = data.x_d_batch.to(device=self.device)
 
         x_p = _forward(x_p, data.edge_index_p, x_p_batch, super().forward, self.lins_p)
         x_d = _forward(x_d, data.edge_index_d, x_d_batch, super().forward, self.lins_d)
@@ -796,6 +999,7 @@ class AttentivePairV1(AttentivePka):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
         super().__init__(
             in_channels=num_node_features,
@@ -806,6 +1010,8 @@ class AttentivePairV1(AttentivePka):
             edge_dim=num_edge_features,
             num_timesteps=num_timesteps,
         )
+
+        self.device = get_device(device_str)
 
         self.AttentivePka_p = AttentivePka(
             in_channels=num_node_features,
@@ -830,7 +1036,7 @@ class AttentivePairV1(AttentivePka):
             input_dim=out_channels, nr_of_lin_layers=2, embeding_size=hidden_channels
         )
 
-        self.final_lin = Linear(2, 1, device=DEVICE)
+        self.final_lin = Linear(2, 1, device=self.device)
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
         def _forward(x, edge_attr, edge_index, batch, func):
@@ -838,8 +1044,8 @@ class AttentivePairV1(AttentivePka):
             # run through linear layer
             return forward_lins(x, self.lins)
 
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
-        x_d_batch = data.x_d_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
+        x_d_batch = data.x_d_batch.to(device=self.device)
 
         x_p = _forward(
             x=x_p,
@@ -869,6 +1075,7 @@ class AttentivePair(AttentivePka):
         out_channels=32,
         dropout=0.5,
         attention=False,
+        device_str: str = "cuda",
     ):
         super().__init__(
             in_channels=num_node_features,
@@ -879,6 +1086,8 @@ class AttentivePair(AttentivePka):
             edge_dim=num_edge_features,
             num_timesteps=num_timesteps,
         )
+
+        self.device = get_device(device_str)
 
         self.lins = AttentivePka._return_lin(
             input_dim=out_channels, nr_of_lin_layers=2, embeding_size=hidden_channels
@@ -891,8 +1100,8 @@ class AttentivePair(AttentivePka):
             return forward_lins(x, self.lins)
 
         func = super().forward
-        x_p_batch = data.x_p_batch.to(device=DEVICE)
-        x_d_batch = data.x_d_batch.to(device=DEVICE)
+        x_p_batch = data.x_p_batch.to(device=self.device)
+        x_d_batch = data.x_d_batch.to(device=self.device)
 
         x_p = _forward(
             x=x_p,
@@ -919,8 +1128,10 @@ class GCNProt(GCNSingleArchitecture, GCNSingleForward):
         nr_of_layers: int = 3,
         hidden_channels: int = 96,
         attention=False,
+        device_str: str = "cuda",
     ):
         self.attention = attention
+        self.device = get_device(device_str)
         super().__init__(num_node_features, nr_of_layers, hidden_channels)
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
@@ -935,8 +1146,10 @@ class GCNDeprot(GCNSingleArchitecture, GCNSingleForward):
         nr_of_layers: int = 3,
         hidden_channels: int = 96,
         attention=False,
+        device_str: str = "cuda",
     ):
         self.attention = attention
+        self.device = get_device(device_str)
         super().__init__(num_node_features, nr_of_layers, hidden_channels)
         self.pool = attention_pooling(num_node_features)
 
@@ -952,8 +1165,10 @@ class NNConvProt(NNConvSingleArchitecture, NNConvSingleForward):
         nr_of_layers: int = 3,
         hidden_channels: int = 96,
         attention: bool = False,
+        device_str: str = "cuda",
     ):
         self.attention = attention
+        self.device = get_device(device_str)
 
         super().__init__(
             num_node_features, num_edge_features, nr_of_layers, hidden_channels
@@ -972,8 +1187,10 @@ class NNConvDeprot(NNConvSingleArchitecture, NNConvSingleForward):
         nr_of_layers: int = 3,
         hidden_channels: int = 96,
         attention: bool = False,
+        device_str: str = "cuda",
     ):
         self.attention = attention
+        self.device = get_device(device_str)
         super().__init__(
             num_node_features, num_edge_features, nr_of_layers, hidden_channels
         )
@@ -996,8 +1213,10 @@ class GCNPairTwoConv(GCNPairArchitecture, GCNPairTwoConvForward):
         nr_of_layers: int = 3,
         hidden_channels: int = 96,
         attention: bool = False,
+        device_str: str = "cuda",
     ):
         self.attention = attention
+        self.device = get_device(device_str)
         super().__init__(num_node_features, nr_of_layers, hidden_channels)
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
@@ -1012,8 +1231,10 @@ class GCNPairSingleConv(GCNPairArchitectureV2, GCNPairOneConvForward):
         nr_of_layers: int = 3,
         hidden_channels: int = 96,
         attention: bool = False,
+        device_str: str = "cuda",
     ):
         self.attention = attention
+        self.device = get_device(device_str)
         super().__init__(num_node_features, nr_of_layers, hidden_channels)
 
     def forward(self, x_p, x_d, edge_attr_p, edge_attr_d, data):
@@ -1028,8 +1249,10 @@ class NNConvPair(NNConvPairArchitecture, NNConvPairForward):
         nr_of_layers: int = 3,
         hidden_channels: int = 96,
         attention: bool = False,
+        device_str: str = "cuda",
     ):
         self.attention = attention
+        self.device = get_device(device_str)
         super().__init__(
             num_node_features, num_edge_features, nr_of_layers, hidden_channels
         )
@@ -1045,16 +1268,19 @@ class NNConvPair(NNConvPairArchitecture, NNConvPairForward):
 # Functions for training and testing of GCN models
 
 calculate_mse = torch.nn.MSELoss()
-calculate_mae = torch.nn.L1Loss()  # that's the MAE Loss
+calculate_mae = torch.nn.L1Loss()
 
 
 def gcn_train(model, training_loader, optimizer, reg_loader=None):
+    if hasattr(model, "device"):
+        device = model.device
+    else:
+        device = get_device("cuda")
+
     model.train()
     if reg_loader:
-        for train_data, reg_data in zip(
-            training_loader, reg_loader
-        ):  # Iterate in batches over the training dataset.
-            train_data.to(device=DEVICE)
+        for train_data, reg_data in zip(training_loader, reg_loader):
+            train_data.to(device=device)
             out = model(
                 x_p=train_data.x_p,
                 x_d=train_data.x_d,
@@ -1063,8 +1289,8 @@ def gcn_train(model, training_loader, optimizer, reg_loader=None):
                 data=train_data,
             )
             ref = train_data.reference_value
-            loss = calculate_mse(out.flatten(), ref)  # Compute the loss.
-            reg_data.to(device=DEVICE)
+            loss = calculate_mse(out.flatten(), ref)
+            reg_data.to(device=device)
             out = model(
                 x_p=reg_data.x_p,
                 x_d=reg_data.x_d,
@@ -1073,14 +1299,14 @@ def gcn_train(model, training_loader, optimizer, reg_loader=None):
                 data=reg_data,
             )
             ref = reg_data.reference_value
-            loss += calculate_mse(out.flatten(), ref)  # Compute the loss.
+            loss += calculate_mse(out.flatten(), ref)
 
-            loss.backward()  # Derive gradients.
-            optimizer.step()  # Update parameters based on gradients.
-            optimizer.zero_grad()  # Clear gradients.
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
     else:
-        for data in training_loader:  # Iterate in batches over the training dataset.
-            data.to(device=DEVICE)
+        for data in training_loader:
+            data.to(device=device)
             out = model(
                 x_p=data.x_p,
                 x_d=data.x_d,
@@ -1089,30 +1315,34 @@ def gcn_train(model, training_loader, optimizer, reg_loader=None):
                 data=data,
             )
             ref = data.reference_value
-            loss = calculate_mse(out.flatten(), ref)  # Compute the loss.
+            loss = calculate_mse(out.flatten(), ref)
 
-            loss.backward()  # Derive gradients.
-            optimizer.step()  # Update parameters based on gradients.
-            optimizer.zero_grad()  # Clear gradients.
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
 
 
 def gcn_test(model, loader) -> float:
+    if hasattr(model, "device"):
+        device = model.device
+    else:
+        device = get_device("cuda")
+
     model.eval()
-    loss = torch.Tensor([0]).to(device=DEVICE)
-    for data in loader:  # Iterate in batches over the training dataset.
-        data.to(device=DEVICE)
+    loss = torch.Tensor([0]).to(device=device)
+    for data in loader:
+        data.to(device=device)
         out = model(
             x_p=data.x_p,
             x_d=data.x_d,
             edge_attr_p=data.edge_attr_p,
             edge_attr_d=data.edge_attr_d,
             data=data,
-        )  # Perform a single forward pass.
+        )
         ref = data.reference_value
         loss += calculate_mae(out.flatten(), ref).detach()
-    return round(
-        float(loss / len(loader)), 3
-    )  # MAE loss of batches can be summed and divided by the number of batches
+    # MAE loss of batches can be summed and divided by the number of batches
+    return round(float(loss / len(loader)), 3)
 
 
 def save_checkpoint(
@@ -1136,17 +1366,16 @@ def save_checkpoint(
     )
 
     # save performance of best model evaluated on validation set
-    if epoch != 0:
-        if validation_loss < min(all_validation_loss[:-1]):
-            torch.save(
-                {
-                    "epoch": performance["epoch"],
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "loss": validation_loss,
-                },
-                f"{path}/{prefix}best_model.pt",
-            )
+    if epoch != 0 and validation_loss < min(all_validation_loss[:-1]):
+        torch.save(
+            {
+                "epoch": performance["epoch"],
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "loss": validation_loss,
+            },
+            f"{path}/{prefix}best_model.pt",
+        )
 
 
 def gcn_full_training(
@@ -1177,9 +1406,7 @@ def gcn_full_training(
     from torch import optim
 
     pbar = tqdm(range(model.checkpoint["epoch"], NUM_EPOCHS + 1), desc="Epoch: ")
-    results = {}
-    results["training-set"] = []
-    results["validation-set"] = []
+    results = {"training-set": [], "validation-set": []}
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, patience=150, verbose=True, factor=0.5
     )

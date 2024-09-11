@@ -1,9 +1,9 @@
-from typing import Tuple
+import logging
 
-import numpy as np
+import torch
 from torch_geometric.loader import DataLoader
 
-from pkasolver.constants import DEVICE
+logger = logging.getLogger(__name__)
 
 
 # PyG Dataset to Dataloader
@@ -28,42 +28,13 @@ def dataset_to_dataloader(
     )
 
 
-def calculate_performance_of_model_on_data(
-    model, loader: DataLoader
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    ----------
-    model
-        graph model to be used for predictions
-    loader
-        data to be predicted
-    Returns
-    -------
-    np.array
-        list of empirical pKa values
-    np.array
-        list of predicted pKa values
-    """
-    model.eval()
-    y_dataset, x_dataset = [], []
-    for data in loader:  # Iterate in batches over the training dataset.
-
-        data.to(device=DEVICE)
-        y_pred = (
-            model(
-                x_p=data.x_p,
-                x_d=data.x_d,
-                edge_attr_p=data.edge_attr_p,
-                edge_attr_d=data.edge_attr_d,
-                data=data,
-            )
-            .reshape(-1)
-            .detach()
-        )
-        ref = data.reference_value
-        y_dataset.extend(y_pred.tolist())
-        x_dataset.extend(ref.detach().tolist())
-
-    return np.array(x_dataset), np.array(y_dataset)
-
-
+def get_device(device_str: str) -> torch.device:
+    if device_str == "cpu":
+        return torch.device("cpu")
+    elif device_str == "cuda":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        logger.warning("CUDA is not available, using CPU instead")
+        return torch.device("cpu")
+    else:
+        raise ValueError(f"Unknown device {device_str}")

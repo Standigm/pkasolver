@@ -1,11 +1,22 @@
 import torch
-from pkasolver.constants import DEVICE, edge_feat_values
+from pkasolver.constants import edge_feat_values
 from pkasolver.data import calculate_nr_of_features
-from pkasolver.ml_architecture import (GATPair, GATProt, GCNDeprot,
-                                       GCNPairSingleConv, GCNPairTwoConv,
-                                       GCNProt, GINPairV1, GINPairV2,
-                                       GINPairV3, GINProt, NNConvDeprot,
-                                       NNConvPair, NNConvProt)
+from pkasolver.ml import get_device
+from pkasolver.ml_architecture import (
+    GATPair,
+    GATProt,
+    GCNDeprot,
+    GCNPairSingleConv,
+    GCNPairTwoConv,
+    GCNProt,
+    GINPairV1,
+    GINPairV2,
+    GINPairV3,
+    GINProt,
+    NNConvDeprot,
+    NNConvPair,
+    NNConvProt,
+)
 
 models = [
     ("GCNPairSingleConv", GCNPairSingleConv),
@@ -18,9 +29,10 @@ models = [
     # ("GINProt", GINProt),
 ]
 
+test_cpu_device = get_device("cpu")
+
 
 def test_init_gcn_models():
-
     #################
     # test single models
     for model_name, model_class in models:
@@ -31,8 +43,7 @@ def test_init_gcn_models():
 
 
 def test_train_gcn_models():
-    from pkasolver.data import (load_data, make_pyg_dataset_from_dataframe,
-                                preprocess)
+    from pkasolver.data import load_data, make_pyg_dataset_from_dataframe, preprocess
     from pkasolver.ml import dataset_to_dataloader
     from pkasolver.ml_architecture import gcn_test, gcn_train
 
@@ -45,7 +56,9 @@ def test_train_gcn_models():
     # start with generating datasets based on charge
 
     # generated PairedData set
-    dataset = make_pyg_dataset_from_dataframe(df, list_n, list_e, paired=True)
+    dataset = make_pyg_dataset_from_dataframe(
+        df, list_n, list_e, paired=True, device=test_cpu_device
+    )
     dataloader = dataset_to_dataloader(dataset, batch_size=64, shuffle=False)
 
     # calculate node/edge features
@@ -54,7 +67,8 @@ def test_train_gcn_models():
 
     for model_name, model_class in models:
         print(model_name)
-        print(model_class)  #################
+        print(model_class)
+        #################
         # test single models
 
         for attention_mode in [False, True]:
@@ -63,7 +77,7 @@ def test_train_gcn_models():
                 num_node_features=num_node_features,
                 num_edge_features=num_edge_features,
                 attention=attention_mode,
-            ).to(device=DEVICE)
+            ).to(device=test_cpu_device)
             print(model)
             optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 
@@ -79,22 +93,21 @@ def test_train_gcn_models():
     # start with generating datasets based on charge
 
     # generated PairedData set
-    dataset = make_pyg_dataset_from_dataframe(df, list_n, list_e, paired=True)
+    dataset = make_pyg_dataset_from_dataframe(
+        df, list_n, list_e, paired=True, device=test_cpu_device
+    )
     dataloader = dataset_to_dataloader(dataset, batch_size=64, shuffle=False)
 
     # calculate node/edge features
     num_node_features = calculate_nr_of_features(list_n)
     num_edge_features = calculate_nr_of_features(list_e)
 
-    i_e = 0
-    for feat in list_e:
-        i_e += len(edge_feat_values[feat])
+    i_e = sum(len(edge_feat_values[feat]) for feat in list_e)
     num_edge_features = i_e
 
     for model_name, model_class in models:
         print(model_name)
-        print(model_class)  #################
-        # test single models
+        print(model_class)
         #################
         # test single models
 
@@ -105,9 +118,9 @@ def test_train_gcn_models():
                 num_edge_features=num_edge_features,
                 hidden_channels=64,
                 attention=attention_mode,
-            ).to(device=DEVICE)
+            ).to(device=test_cpu_device)
             print(model)
-            print(DEVICE)
+            print(test_cpu_device)
             optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 
             gcn_train(model, dataloader, optimizer)
@@ -125,8 +138,7 @@ new_models = [
 
 
 def test_train_new_models():
-    from pkasolver.data import (load_data, make_pyg_dataset_from_dataframe,
-                                preprocess)
+    from pkasolver.data import load_data, make_pyg_dataset_from_dataframe, preprocess
     from pkasolver.ml import dataset_to_dataloader
     from pkasolver.ml_architecture import gcn_test, gcn_train
 
@@ -152,7 +164,9 @@ def test_train_new_models():
     ]  # start with generating datasets based on charge
 
     # generated PairedData set
-    dataset = make_pyg_dataset_from_dataframe(df, list_n, list_e, paired=True)
+    dataset = make_pyg_dataset_from_dataframe(
+        df, list_n, list_e, paired=True, device=test_cpu_device
+    )
     dataloader = dataset_to_dataloader(dataset, batch_size=64, shuffle=False)
     # calculate node/edge features
     num_node_features = calculate_nr_of_features(list_n)
@@ -160,7 +174,8 @@ def test_train_new_models():
 
     for model_name, model_class in new_models:
         print(model_name)
-        print(model_class)  #################
+        print(model_class)
+        #################
         # test single models
 
         for attention_mode in [False, True]:
@@ -170,7 +185,7 @@ def test_train_new_models():
                 num_edge_features=num_edge_features,
                 hidden_channels=64,
                 attention=attention_mode,
-            ).to(device=DEVICE)
+            ).to(device=test_cpu_device)
             print(model)
             optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 
@@ -185,8 +200,7 @@ new_models = [
 
 
 def test_only_GINPairV1_and_GINPairV3_models():
-    from pkasolver.data import (load_data, make_pyg_dataset_from_dataframe,
-                                preprocess)
+    from pkasolver.data import load_data, make_pyg_dataset_from_dataframe, preprocess
     from pkasolver.ml import dataset_to_dataloader
     from pkasolver.ml_architecture import gcn_test, gcn_train
 
@@ -213,7 +227,9 @@ def test_only_GINPairV1_and_GINPairV3_models():
     ]  # start with generating datasets based on charge
 
     # generated PairedData set
-    dataset = make_pyg_dataset_from_dataframe(df, list_n, list_e, paired=True)
+    dataset = make_pyg_dataset_from_dataframe(
+        df, list_n, list_e, paired=True, device=test_cpu_device
+    )
     dataloader = dataset_to_dataloader(dataset, batch_size=64, shuffle=False)
     # calculate node/edge features
     num_node_features = calculate_nr_of_features(list_n)
@@ -230,7 +246,7 @@ def test_only_GINPairV1_and_GINPairV3_models():
             num_edge_features=num_edge_features,
             hidden_channels=96,
             attention=False,
-        ).to(device=DEVICE)
+        ).to(device=test_cpu_device)
         print(model)
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 
@@ -248,7 +264,7 @@ def test_only_GINPairV1_and_GINPairV3_models():
 
         print(
             "Number of parameters: ",
-            sum(p.numel() for p in model.parameters() if p.requires_grad == True),
+            sum(p.numel() for p in model.parameters() if p.requires_grad),
         )
 
 
@@ -257,8 +273,7 @@ def test_only_GINProt_models():
         ("GINProt", GINProt),
     ]
 
-    from pkasolver.data import (load_data, make_pyg_dataset_from_dataframe,
-                                preprocess)
+    from pkasolver.data import load_data, make_pyg_dataset_from_dataframe, preprocess
     from pkasolver.ml import dataset_to_dataloader
     from pkasolver.ml_architecture import gcn_test, gcn_train
 
@@ -285,7 +300,9 @@ def test_only_GINProt_models():
     ]  # start with generating datasets based on charge
 
     # generated PairedData set
-    dataset = make_pyg_dataset_from_dataframe(df, list_n, list_e, paired=True)
+    dataset = make_pyg_dataset_from_dataframe(
+        df, list_n, list_e, paired=True, device=test_cpu_device
+    )
     dataloader = dataset_to_dataloader(dataset, batch_size=64, shuffle=False)
     # calculate node/edge features
     num_node_features = calculate_nr_of_features(list_n)
@@ -303,7 +320,7 @@ def test_only_GINProt_models():
             hidden_channels=128,
             out_channels=64,
             attention=False,
-        ).to(device=DEVICE)
+        ).to(device=test_cpu_device)
         print(model)
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 
@@ -324,14 +341,10 @@ def test_only_GINProt_models():
 
 
 def test_count_nr_of_parameters():
-
-    import torch.nn.functional as F
     from torch.nn import Linear, ModuleList
 
-    lins = []
-    lins.append(Linear(64, 96))
-    for _ in range(0, 2):
-        lins.append(Linear(96, 96))
+    lins = [Linear(64, 96)]
+    lins.extend(Linear(96, 96) for _ in range(2))
     lins.append(Linear(96, 1))
     model = ModuleList(lins)
     print(model)
@@ -342,9 +355,7 @@ def test_count_nr_of_parameters():
 
 
 def test_count_nr_of_parameters_for_GIN():
-
-    import torch.nn.functional as F
-    from torch_geometric.nn.models import GAT, GIN, AttentiveFP
+    from pkasolver.ml_architecture import GIN
 
     list_n = [
         "element",
@@ -358,11 +369,6 @@ def test_count_nr_of_parameters_for_GIN():
         "reaction_center",
         "smarts",
     ]
-    list_e = [
-        "bond_type",
-        "is_conjugated",
-        "rotatable",
-    ]  # start with generating datasets based on charge
 
     # calculate node/edge features
     num_node_features = calculate_nr_of_features(list_n)
@@ -375,7 +381,5 @@ def test_count_nr_of_parameters_for_GIN():
         dropout=0.5,
     )
 
-    nr_of_parameters = sum(
-        p.numel() for p in model.parameters() if p.requires_grad == True
-    )
+    nr_of_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Number of parameters: {nr_of_parameters=}")

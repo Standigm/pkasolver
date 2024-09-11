@@ -8,23 +8,22 @@ from rdkit.Chem import PandasTools, PropertyMol
 from rdkit.Chem.AllChem import Compute2DCoords
 from rdkit.Chem.PandasTools import LoadSDF
 
-PandasTools.RenderImagesInAllDataFrames(images=True)
-import random
-
 import numpy as np
 import pandas as pd
 import torch
 import tqdm
+from pandas.core.common import flatten
 from torch_geometric.data import Data
 
 from pkasolver.chem import create_conjugate
 from pkasolver.constants import (
-    DEVICE,
     EDGE_FEATURES,
     NODE_FEATURES,
     edge_feat_values,
     node_feat_values,
 )
+
+PandasTools.RenderImagesInAllDataFrames(images=True)
 
 
 def load_data(base: str = "data/Baltruschat") -> dict:
@@ -47,12 +46,11 @@ def load_data(base: str = "data/Baltruschat") -> dict:
     sdf_filepath_novartis = f"{base}/novartis_cleaned_mono_unique_notraindata.sdf"
     sdf_filepath_Literture = f"{base}/AvLiLuMoVe_cleaned_mono_unique_notraindata.sdf"
 
-    datasets = {
+    return {
         "Training": sdf_filepath_training,
         "Novartis": sdf_filepath_novartis,
         "Literature": sdf_filepath_Literture,
     }
-    return datasets
 
 
 # data preprocessing functions - helpers
@@ -273,9 +271,6 @@ class PairData(Data):
             return super().__inc__(key, value, *args, **kwargs)
 
 
-from pandas.core.common import flatten
-
-
 def calculate_nr_of_features(feature_list: list) -> int:
     """Calculates number of nodes and edge one hot features from input list.
 
@@ -323,9 +318,7 @@ def make_nodes(mol: Chem.rdchem.Mol, atom_idx: int, n_features: dict) -> torch.T
     """
     x = []
     for atom in mol.GetAtoms():
-        node = []
-        for feat in n_features.values():
-            node.append(feat(atom, atom_idx))
+        node = [feat(atom, atom_idx) for feat in n_features.values()]
         node = list(flatten(node))
         x.append(node)
     return torch.tensor(np.array([np.array(xi) for xi in x]), dtype=torch.float)
@@ -355,25 +348,23 @@ def make_edges_and_attr(
     edges = []
     edge_attr = []
     for bond in mol.GetBonds():
-        edges.append(
-            np.array(
-                [
-                    [bond.GetBeginAtomIdx()],
-                    [bond.GetEndAtomIdx()],
-                ]
+        edges.extend(
+            (
+                np.array(
+                    [
+                        [bond.GetBeginAtomIdx()],
+                        [bond.GetEndAtomIdx()],
+                    ]
+                ),
+                np.array(
+                    [
+                        [bond.GetEndAtomIdx()],
+                        [bond.GetBeginAtomIdx()],
+                    ]
+                ),
             )
         )
-        edges.append(
-            np.array(
-                [
-                    [bond.GetEndAtomIdx()],
-                    [bond.GetBeginAtomIdx()],
-                ]
-            )
-        )
-        edge = []
-        for feat in e_features.values():
-            edge.append(feat(bond))
+        edge = [feat(bond) for feat in e_features.values()]
         edge = list(flatten(edge))
         edge_attr.extend([edge] * 2)
 
@@ -471,7 +462,7 @@ def mol_to_paired_mol_data(
         deprot, atom_idx, n_features, e_features
     )
 
-    data = PairData(
+    return PairData(
         edge_index_p=edge_index_p,
         edge_attr_p=edge_attr_p,
         x_p=node_p,
@@ -481,7 +472,6 @@ def mol_to_paired_mol_data(
         x_d=node_d,
         charge_d=charge_d,
     )
-    return data
 
 
 def mol_to_single_mol_data(
@@ -517,7 +507,12 @@ def mol_to_single_mol_data(
 
 
 def make_pyg_dataset_from_dataframe(
-    df: pd.DataFrame, list_n: list, list_e: list, paired=False, mode: str = "all"
+    df: pd.DataFrame,
+    list_n: list,
+    list_e: list,
+    paired=False,
+    mode: str = "all",
+    device: torch.device = torch.device("cpu"),
 ) -> list:
     """Take a Dataframe, a list of strings of node features, a list of strings of edge features
     and return a List of PyG Data objects.
@@ -548,9 +543,14 @@ def make_pyg_dataset_from_dataframe(
 
     selected_node_features = make_features_dicts(NODE_FEATURES, list_n)
     selected_edge_features = make_features_dicts(EDGE_FEATURES, list_e)
-    if paired:
-        dataset = []
-        for i in df.index:
+
+    dataset = []
+
+    if not paired:
+        print(f"Generating data with {mode} form")
+
+    for i in df.index:
+        if paired:
             m = mol_to_paired_mol_data(
                 df.protonated[i],
                 df.deprotonated[i],
@@ -558,36 +558,29 @@ def make_pyg_dataset_from_dataframe(
                 selected_node_features,
                 selected_edge_features,
             )
-            m.reference_value = torch.tensor([df.pKa[i]], dtype=torch.float32)
-            m.ID = df.ID[i]
-            m.to(device=DEVICE)  # NOTE: put everything on the GPU
-            dataset.append(m)
-        return dataset
-    else:
-        print(f"Generating data with {mode} form")
-        dataset = []
-        for i in df.index:
-            if mode == "protonated":
-                m, molecular_charge = mol_to_single_mol_data(
-                    df.protonated[i],
-                    df.marvin_atom[i],
-                    selected_node_features,
-                    selected_edge_features,
-                )
-            elif mode == "deprotonated":
-                m, molecular_charge = mol_to_single_mol_data(
-                    df.deprotonated[i],
-                    df.marvin_atom[i],
-                    selected_node_features,
-                    selected_edge_features,
-                )
-            else:
-                raise RuntimeError()
-            m.reference_value = torch.tensor([df.pKa[i]], dtype=torch.float32)
-            m.ID = df.ID[i]
-            m.to(device=DEVICE)  # NOTE: put everything on the GPU
-            dataset.append(m)
-        return dataset
+        elif mode == "protonated":
+            m, _ = mol_to_single_mol_data(
+                df.protonated[i],
+                df.marvin_atom[i],
+                selected_node_features,
+                selected_edge_features,
+            )
+        elif mode == "deprotonated":
+            m, _ = mol_to_single_mol_data(
+                df.deprotonated[i],
+                df.marvin_atom[i],
+                selected_node_features,
+                selected_edge_features,
+            )
+        else:
+            raise RuntimeError()
+
+        m.reference_value = torch.tensor([df.pKa[i]], dtype=torch.float32)
+        m.ID = df.ID[i]
+        m.to(device=device)
+        dataset.append(m)
+
+    return dataset
 
 
 def make_paired_pyg_data_from_mol(
@@ -662,7 +655,7 @@ def make_paired_pyg_data_from_mol(
         m.pka_type = ""
     try:
         m.ID = props["ID"]
-    except:
+    except Exception:
         m.ID = ""
     return m
 
@@ -723,7 +716,6 @@ def iterate_over_acids(
     for idx, acid_prop in enumerate(
         reversed(acidic_mols_properties)
     ):  # list must be iterated in reverse, in order to protonated the strongest conjugate base first
-
         if skipping_acids == 0:  # if a acid was skipped, all further acids are skipped
             try:
                 new_mol = create_conjugate(
@@ -753,12 +745,12 @@ def iterate_over_acids(
             for mol in [new_mol, partner_mol]:
                 GLOBAL_COUNTER += 1
                 counter_list.append(GLOBAL_COUNTER)
-                mol.SetProp(f"CHEMBL_ID", str(acid_prop["chembl_id"]))
-                mol.SetProp(f"INTERNAL_ID", str(GLOBAL_COUNTER))
-                mol.SetProp(f"pKa", str(acid_prop["pka_value"]))
-                mol.SetProp(f"epik_atom", str(acid_prop["atom_idx"]))
-                mol.SetProp(f"pKa_number", f"acid_{idx + 1}")
-                mol.SetProp(f"mol-smiles", f"{Chem.MolToSmiles(mol)}")
+                mol.SetProp("CHEMBL_ID", str(acid_prop["chembl_id"]))
+                mol.SetProp("INTERNAL_ID", str(GLOBAL_COUNTER))
+                mol.SetProp("pKa", str(acid_prop["pka_value"]))
+                mol.SetProp("epik_atom", str(acid_prop["atom_idx"]))
+                mol.SetProp("pKa_number", f"acid_{idx + 1}")
+                mol.SetProp("mol-smiles", f"{Chem.MolToSmiles(mol)}")
 
             # add current mol to list of acidic mol. for next
             # lower pKa value, this mol is starting structure
@@ -859,12 +851,12 @@ def iterate_over_bases(
             for mol in [partner_mol, new_mol]:
                 GLOBAL_COUNTER += 1
                 counter_list.append(GLOBAL_COUNTER)
-                mol.SetProp(f"CHEMBL_ID", str(basic_prop["chembl_id"]))
-                mol.SetProp(f"INTERNAL_ID", str(GLOBAL_COUNTER))
-                mol.SetProp(f"pKa", str(basic_prop["pka_value"]))
-                mol.SetProp(f"epik_atom", str(basic_prop["atom_idx"]))
-                mol.SetProp(f"pKa_number", f"acid_{idx + 1}")
-                mol.SetProp(f"mol-smiles", f"{Chem.MolToSmiles(mol)}")
+                mol.SetProp("CHEMBL_ID", str(basic_prop["chembl_id"]))
+                mol.SetProp("INTERNAL_ID", str(GLOBAL_COUNTER))
+                mol.SetProp("pKa", str(basic_prop["pka_value"]))
+                mol.SetProp("epik_atom", str(basic_prop["atom_idx"]))
+                mol.SetProp("pKa_number", f"acid_{idx + 1}")
+                mol.SetProp("mol-smiles", f"{Chem.MolToSmiles(mol)}")
 
             # add current mol to list of acidic mol. for next
             # lower pKa value, this mol is starting structure

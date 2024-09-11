@@ -1,23 +1,24 @@
 import logging
 
-from pkasolver.chem import (atom_smarts_query, bond_smarts_query,
-                            make_smarts_features)
+import torch
+
+from pkasolver.chem import atom_smarts_query, bond_smarts_query, make_smarts_features
 
 logger = logging.getLogger(__name__)
-
-import torch
 
 NUM_THREADS = 1
 torch.set_num_threads(NUM_THREADS)
 logger.debug(f"Setting num threads to {NUM_THREADS}")
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 42
-logger.debug(f"Pytorch will use {DEVICE}")
 
 # Defining Smarts patterns used to calculate some node and edge features
 rotatable_bond = "[!$(*#*)&!D1]-&!@[!$(*#*)&!D1]"
-rotatable_bond_no_amide = "[!$([NH]!@C(=O))&!D1&!$(*#*)]-&!@[!$([NH]!@C(=O))&!D1&!$(*#*)]"  # any good? https://rdkit-discuss.narkive.com/4o99LqS6/rotatable-bonds-amide-bonds-and-smarts
+# any good? https://rdkit-discuss.narkive.com/4o99LqS6/rotatable-bonds-amide-bonds-and-smarts
+rotatable_bond_no_amide = (
+    "[!$([NH]!@C(=O))&!D1&!$(*#*)]-&!@[!$([NH]!@C(=O))&!D1&!$(*#*)]"
+)
+
 amide = "[NX3][CX3](=[OX1])[#6]"
 keton = "[CX3]=[OX1]"
 
@@ -45,7 +46,7 @@ smarts_dict = {
     "(-BO2H)-": ["[!O]B([O-])[OH]", "[!O]B([O-])[O-]"],
     "cyclopentadiene": ["C1=CC=C[CH2]1", "c1ccc[cH-]1"],
     "-CONH2": ["C(=O)[NH2]", "C(=O)[NH-]"],
-    "imidazole": ["c1cnc[nH]1" "c1cnc[n-]1"],
+    "imidazole": ["c1cnc[nH]1c1cnc[n-]1"],
     "-OH (aliphatic alcohol)": ["[CX4][OH]", "[CX4][O-]"],
     "alpha-carbon-hydrogen-keto group": ["O=C([!O])[C!H0+0]", "O=C([!O])[C-]"],
     "alpha-carbon-hydrogen-acetyl ester group": ["OC(=O)[C!H0+0]", "OC(=O)[C-]"],
@@ -65,6 +66,7 @@ smarts_dict = {
 }
 
 node_feat_values = {
+    # still missing to mark element that's not in the list
     "element": [
         1,
         6,
@@ -77,7 +79,7 @@ node_feat_values = {
         33,
         35,
         53,
-    ],  # still missing to mark element that's not in the list
+    ],
     "formal_charge": [-1, 0, 1],
     "is_in_ring": [1],
     "amide_center_atom": [1],
@@ -92,9 +94,13 @@ node_feat_values = {
 
 # defining helper dictionaries for generating one hot encoding of atom features
 NODE_FEATURES = {
+    # still missing to mark element that's not in the list
     "element": lambda atom, marvin_atom: list(
-        map(lambda s: int(atom.GetAtomicNum() == s), node_feat_values["element"],)
-    ),  # still missing to mark element that's not in the list
+        map(
+            lambda s: int(atom.GetAtomicNum() == s),
+            node_feat_values["element"],
+        )
+    ),
     "formal_charge": lambda atom, marvin_atom: list(
         map(
             lambda s: int(atom.GetFormalCharge() == s),
@@ -110,7 +116,10 @@ NODE_FEATURES = {
         )
     ),
     "total_num_Hs": lambda atom, marvin_atom: list(
-        map(lambda s: int(atom.GetTotalNumHs() == s), node_feat_values["total_num_Hs"],)
+        map(
+            lambda s: int(atom.GetTotalNumHs() == s),
+            node_feat_values["total_num_Hs"],
+        )
     ),
     "aromatic_tag": lambda atom, marvin_atom: atom.GetIsAromatic(),
     "total_valence": lambda atom, marvin_atom: list(
@@ -121,7 +130,8 @@ NODE_FEATURES = {
     ),
     "total_degree": lambda atom, marvin_atom: list(
         map(
-            lambda s: int(atom.GetTotalDegree() == s), node_feat_values["total_degree"],
+            lambda s: int(atom.GetTotalDegree() == s),
+            node_feat_values["total_degree"],
         )
     ),
     "reaction_center": lambda atom, marvin_atom: atom.GetIdx() == int(marvin_atom),
