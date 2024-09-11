@@ -77,11 +77,7 @@ def create_conjugate(
         )
     atom.UpdatePropertyCache()
 
-    if (
-        atom.GetSymbol() == "O"
-        and atom.GetFormalCharge() == 1
-        and known_pka_values == False
-    ):
+    if atom.GetSymbol() == "O" and atom.GetFormalCharge() == 1 and not known_pka_values:
         raise RuntimeError("Protonating already protonated oxygen. Aborting.")
 
     Tot_Hs_after = atom.GetTotalNumHs()
@@ -112,10 +108,10 @@ def bond_smarts_query(bond, smarts):
     bool
         returns True if bond is part of a substructure that matches the smarts pattern
     """
-    for match in bond.GetOwningMol().GetSubstructMatches(Chem.MolFromSmarts(smarts)):
-        if set((bond.GetBeginAtomIdx(), bond.GetEndAtomIdx())) == set(match):
-            return True
-    return False
+    return any(
+        {bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()} == set(match)
+        for match in bond.GetOwningMol().GetSubstructMatches(Chem.MolFromSmarts(smarts))
+    )
 
 
 def atom_smarts_query(atom, smarts) -> bool:
